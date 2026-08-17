@@ -15,3 +15,4 @@ Unity3d uGUI script that draw multiplie images same as built-in, but in one line
 - left / right / up / down fill and segments direction
 - preserve aspect
 - ppu multiplier
+- skip specific segments
