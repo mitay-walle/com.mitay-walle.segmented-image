@@ -1,283 +1,256 @@
 using System;
 using System.Collections;
-#if UNITY_EDITOR
-using UnityEditor;
-using UnityEditor.AnimatedValues;
-#endif
 using UnityEngine;
 using UnityEngine.Sprites;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.AnimatedValues;
+#endif
 
+public enum ValueMode
+{
+    Int,
+    Float
+}
+
+[Icon("Image Icon")]
 [RequireComponent(typeof(CanvasRenderer))]
 [AddComponentMenu("UI (Canvas)/Segmented Image", 12)]
 public class SegmentedImage : Image
 {
-    public enum ValueMode
+    private static readonly Vector2[] VertScratch = new Vector2[4];
+    private static readonly Vector2[] UVScratch = new Vector2[4];
+    private static readonly Vector3[] XY = new Vector3[4];
+    private static readonly Vector3[] UV = new Vector3[4];
+
+    [FormerlySerializedAs("m_SegmentCount")]
+    [SerializeField] [Min(1)] private int _mSegmentCount = 5;
+    [FormerlySerializedAs("m_Spacing")]
+    [SerializeField] [Min(0f)] private float _mSpacing = 2f;
+    [FormerlySerializedAs("m_Direction")]
+    [SerializeField] private Slider.Direction _mDirection = Slider.Direction.LeftToRight;
+    [FormerlySerializedAs("m_EmptyColor")]
+    [SerializeField] private Color _mEmptyColor = Color.clear;
+    [FormerlySerializedAs("m_IsHandle")]
+    [SerializeField] private bool _mIsHandle;
+    [FormerlySerializedAs("m_DrawMaskWords")]
+    [SerializeField] private int[] _mDrawMaskWords =
     {
-        Int,
-        Float
-    }
+        -1
+    };
+    [FormerlySerializedAs("m_ValueMode")]
+    [SerializeField] private ValueMode _mValueMode = ValueMode.Float;
+    [SerializeField] [HideInInspector] [FormerlySerializedAs("m_Axis")] private RectTransform.Axis _mLegacyAxis = RectTransform.Axis.Horizontal;
+    [SerializeField] [HideInInspector] [FormerlySerializedAs("m_FillInvert")] private bool _mLegacyFillInvert;
+    [FormerlySerializedAs("m_SerializationVersion")]
+    [SerializeField] [HideInInspector] private int _mSerializationVersion;
+    [FormerlySerializedAs("m_IntMaxValue")]
+    [SerializeField] [Min(1)] private int _mIntMaxValue = 5;
+    [FormerlySerializedAs("m_FloatMaxValue")]
+    [SerializeField] [Min(0.0001f)] private float _mFloatMaxValue = 1f;
 
-    [SerializeField, Min(1)] private int m_SegmentCount = 5;
-    [SerializeField, Min(0f)] private float m_Spacing = 2f;
-    [SerializeField] private Slider.Direction m_Direction = Slider.Direction.LeftToRight;
-    [SerializeField] private Color m_EmptyColor = Color.clear;
-    [SerializeField] private bool m_IsHandle;
-    [SerializeField] private int[] m_DrawMaskWords = { -1 };
-    [SerializeField] private ValueMode m_ValueMode = ValueMode.Float;
-    [SerializeField, HideInInspector, FormerlySerializedAs("m_Axis")] private RectTransform.Axis m_LegacyAxis = RectTransform.Axis.Horizontal;
-    [SerializeField, HideInInspector, FormerlySerializedAs("m_FillInvert")] private bool m_LegacyFillInvert;
-    [SerializeField, HideInInspector] private int m_SerializationVersion;
-    [SerializeField, Min(1)] private int m_IntMaxValue = 5;
-    [SerializeField, Min(0.0001f)] private float m_FloatMaxValue = 1f;
-
-    private static readonly Vector2[] s_VertScratch = new Vector2[4];
-    private static readonly Vector2[] s_UVScratch = new Vector2[4];
-    private static readonly Vector3[] s_Xy = new Vector3[4];
-    private static readonly Vector3[] s_Uv = new Vector3[4];
-
-    public int segmentCount
+    public int SegmentCount
     {
-        get => m_SegmentCount;
+        get => _mSegmentCount;
         set
         {
             value = Mathf.Max(1, value);
-            if (m_SegmentCount == value)
-                return;
 
-            m_SegmentCount = value;
+            if (_mSegmentCount == value)
+            {
+                return;
+            }
+
+            _mSegmentCount = value;
             EnsureDrawMaskSize(true);
             SetAllDirty();
         }
     }
 
-    public float spacing
+    public float Spacing
     {
-        get => m_Spacing;
+        get => _mSpacing;
         set
         {
             value = Mathf.Max(0f, value);
-            if (Mathf.Approximately(m_Spacing, value))
-                return;
 
-            m_Spacing = value;
+            if (Mathf.Approximately(_mSpacing, value))
+            {
+                return;
+            }
+
+            _mSpacing = value;
             SetAllDirty();
         }
     }
 
-    public Slider.Direction direction
+    public Slider.Direction Direction
     {
-        get => m_Direction;
+        get => _mDirection;
         set
         {
-            if (m_Direction == value)
+            if (_mDirection == value)
+            {
                 return;
+            }
 
-            m_Direction = value;
+            _mDirection = value;
             SetAllDirty();
         }
     }
 
-    public RectTransform.Axis axis
+    public RectTransform.Axis Axis
     {
         get => IsHorizontal ? RectTransform.Axis.Horizontal : RectTransform.Axis.Vertical;
-        set => direction = value == RectTransform.Axis.Horizontal
-            ? Slider.Direction.LeftToRight
-            : Slider.Direction.BottomToTop;
+        set => Direction = value == RectTransform.Axis.Horizontal
+                               ? Slider.Direction.LeftToRight
+                               : Slider.Direction.BottomToTop;
     }
 
-    public Color emptyColor
+    public Color EmptyColor
     {
-        get => m_EmptyColor;
+        get => _mEmptyColor;
         set
         {
-            if (m_EmptyColor == value)
+            if (_mEmptyColor == value)
+            {
                 return;
+            }
 
-            m_EmptyColor = value;
+            _mEmptyColor = value;
             SetAllDirty();
         }
     }
 
     public bool IsHandle
     {
-        get => m_IsHandle;
+        get => _mIsHandle;
         set
         {
-            if (m_IsHandle == value)
+            if (_mIsHandle == value)
+            {
                 return;
+            }
 
-            m_IsHandle = value;
+            _mIsHandle = value;
             SetAllDirty();
         }
     }
 
-    public ValueMode valueMode
+    public ValueMode ValueMode
     {
-        get => m_ValueMode;
+        get => _mValueMode;
         set
         {
-            if (m_ValueMode == value)
+            if (_mValueMode == value)
+            {
                 return;
+            }
 
-            m_ValueMode = value;
+            _mValueMode = value;
             SetAllDirty();
         }
     }
 
-    public int intMaxValue
+    public int INTMaxValue
     {
-        get => m_IntMaxValue;
+        get => _mIntMaxValue;
         set
         {
             int newMaxValue = Mathf.Max(1, value);
-            if (m_IntMaxValue == newMaxValue)
-                return;
 
-            int currentValue = intValue;
-            m_IntMaxValue = newMaxValue;
-            fillAmount = Mathf.Clamp(currentValue, 0, m_IntMaxValue) / (float)m_IntMaxValue;
+            if (_mIntMaxValue == newMaxValue)
+            {
+                return;
+            }
+
+            int currentValue = INTValue;
+            _mIntMaxValue = newMaxValue;
+            fillAmount = Mathf.Clamp(currentValue, 0, _mIntMaxValue) / (float)_mIntMaxValue;
             SetAllDirty();
         }
     }
 
-    public int intValue
+    public int INTValue
     {
-        get => Mathf.Clamp(Mathf.RoundToInt(fillAmount * m_IntMaxValue), 0, m_IntMaxValue);
+        get => Mathf.Clamp(Mathf.RoundToInt(fillAmount * _mIntMaxValue), 0, _mIntMaxValue);
         set
         {
-            int maxValue = Mathf.Max(1, m_IntMaxValue);
+            int maxValue = Mathf.Max(1, _mIntMaxValue);
             float normalizedValue = Mathf.Clamp(value, 0, maxValue) / (float)maxValue;
+
             if (Mathf.Approximately(fillAmount, normalizedValue))
+            {
                 return;
+            }
 
             fillAmount = normalizedValue;
             SetAllDirty();
         }
     }
 
-    public float floatMaxValue
+    public float FloatMaxValue
     {
-        get => m_FloatMaxValue;
+        get => _mFloatMaxValue;
         set
         {
             float newMaxValue = Mathf.Max(0.0001f, value);
-            if (Mathf.Approximately(m_FloatMaxValue, newMaxValue))
-                return;
 
-            float currentValue = floatValue;
-            m_FloatMaxValue = newMaxValue;
-            fillAmount = Mathf.Clamp(currentValue, 0f, m_FloatMaxValue) / m_FloatMaxValue;
+            if (Mathf.Approximately(_mFloatMaxValue, newMaxValue))
+            {
+                return;
+            }
+
+            float currentValue = FloatValue;
+            _mFloatMaxValue = newMaxValue;
+            fillAmount = Mathf.Clamp(currentValue, 0f, _mFloatMaxValue) / _mFloatMaxValue;
             SetAllDirty();
         }
     }
 
-    public float floatValue
+    public float FloatValue
     {
-        get => fillAmount * m_FloatMaxValue;
+        get => fillAmount * _mFloatMaxValue;
         set
         {
-            float maxValue = Mathf.Max(0.0001f, m_FloatMaxValue);
+            float maxValue = Mathf.Max(0.0001f, _mFloatMaxValue);
             float normalizedValue = Mathf.Clamp(value, 0f, maxValue) / maxValue;
+
             if (Mathf.Approximately(fillAmount, normalizedValue))
+            {
                 return;
+            }
 
             fillAmount = normalizedValue;
             SetAllDirty();
         }
     }
 
-    public BitArray drawMask
+    public BitArray DrawMask
     {
         get
         {
             EnsureDrawMaskSize(false);
-            var result = new BitArray(m_DrawMaskWords) { Length = m_SegmentCount };
+
+            BitArray result = new(_mDrawMaskWords)
+            {
+                Length = _mSegmentCount
+            };
             return result;
         }
         set
         {
             EnsureDrawMaskSize(false);
 
-            var mask = value == null ? new BitArray(m_SegmentCount, true) : new BitArray(value);
-            mask.Length = m_SegmentCount;
-            var words = new int[WordCountFor(m_SegmentCount)];
+            BitArray mask = value == null ? new BitArray(_mSegmentCount, true) : new BitArray(value);
+            mask.Length = _mSegmentCount;
+            int[] words = new int[WordCountFor(_mSegmentCount)];
             mask.CopyTo(words, 0);
-            m_DrawMaskWords = words;
+            _mDrawMaskWords = words;
             SetAllDirty();
         }
-    }
-
-    public bool GetSegmentVisible(int index)
-    {
-        if ((uint)index >= (uint)m_SegmentCount)
-            throw new ArgumentOutOfRangeException(nameof(index));
-
-        EnsureDrawMaskSize(false);
-        int word = index >> 5;
-        int bit = index & 31;
-        return (m_DrawMaskWords[word] & (1 << bit)) != 0;
-    }
-
-
-    private bool GetSegmentVisibleUnchecked(int index)
-    {
-        int word = index >> 5;
-        int bit = index & 31;
-        return (m_DrawMaskWords[word] & (1 << bit)) != 0;
-    }
-
-    public void SetSegmentVisible(int index, bool visible)
-    {
-        if ((uint)index >= (uint)m_SegmentCount)
-            throw new ArgumentOutOfRangeException(nameof(index));
-
-        EnsureDrawMaskSize(false);
-        int word = index >> 5;
-        int bit = index & 31;
-        int mask = 1 << bit;
-
-        if (visible)
-            m_DrawMaskWords[word] |= mask;
-        else
-            m_DrawMaskWords[word] &= ~mask;
-
-        SetAllDirty();
-    }
-
-    public void SetValue(int value, int maxValue)
-    {
-        valueMode = ValueMode.Int;
-        intMaxValue = maxValue;
-        intValue = value;
-    }
-
-    public void SetValue(float value, float maxValue)
-    {
-        valueMode = ValueMode.Float;
-        floatMaxValue = maxValue;
-        floatValue = value;
-    }
-
-    public override void SetNativeSize()
-    {
-        Sprite activeSprite = overrideSprite;
-        if (activeSprite == null)
-            return;
-
-        float width = activeSprite.rect.width / pixelsPerUnit;
-        float height = activeSprite.rect.height / pixelsPerUnit;
-        float gaps = m_Spacing * Mathf.Max(0, m_SegmentCount - 1);
-
-        if (IsHorizontal)
-            width = width * m_SegmentCount + gaps;
-        else
-            height = height * m_SegmentCount + gaps;
-
-        rectTransform.anchorMax = rectTransform.anchorMin;
-        rectTransform.sizeDelta = new Vector2(width, height);
-        SetAllDirty();
     }
 
     public override float preferredWidth
@@ -285,17 +258,22 @@ public class SegmentedImage : Image
         get
         {
             Sprite activeSprite = overrideSprite;
+
             if (activeSprite == null)
+            {
                 return 0f;
+            }
 
             float width = type == Type.Sliced || type == Type.Tiled
-                ? DataUtility.GetMinSize(activeSprite).x / pixelsPerUnit
-                : activeSprite.rect.size.x / pixelsPerUnit;
+                              ? DataUtility.GetMinSize(activeSprite).x / pixelsPerUnit
+                              : activeSprite.rect.size.x / pixelsPerUnit;
 
             if (!IsHorizontal)
+            {
                 return width;
+            }
 
-            return width * m_SegmentCount + m_Spacing * Mathf.Max(0, m_SegmentCount - 1);
+            return width * _mSegmentCount + _mSpacing * Mathf.Max(0, _mSegmentCount - 1);
         }
     }
 
@@ -304,19 +282,32 @@ public class SegmentedImage : Image
         get
         {
             Sprite activeSprite = overrideSprite;
+
             if (activeSprite == null)
+            {
                 return 0f;
+            }
 
             float height = type == Type.Sliced || type == Type.Tiled
-                ? DataUtility.GetMinSize(activeSprite).y / pixelsPerUnit
-                : activeSprite.rect.size.y / pixelsPerUnit;
+                               ? DataUtility.GetMinSize(activeSprite).y / pixelsPerUnit
+                               : activeSprite.rect.size.y / pixelsPerUnit;
 
             if (IsHorizontal)
+            {
                 return height;
+            }
 
-            return height * m_SegmentCount + m_Spacing * Mathf.Max(0, m_SegmentCount - 1);
+            return height * _mSegmentCount + _mSpacing * Mathf.Max(0, _mSegmentCount - 1);
         }
     }
+
+    private bool IsHorizontal =>
+        _mDirection == Slider.Direction.LeftToRight ||
+        _mDirection == Slider.Direction.RightToLeft;
+
+    private bool IsFillSequenceReversed =>
+        _mDirection == Slider.Direction.RightToLeft ||
+        _mDirection == Slider.Direction.TopToBottom;
 
     protected override void OnEnable()
     {
@@ -324,28 +315,130 @@ public class SegmentedImage : Image
         base.OnEnable();
     }
 
+    protected override void OnDidApplyAnimationProperties()
+    {
+        base.OnDidApplyAnimationProperties();
+        _mSegmentCount = Mathf.Max(1, _mSegmentCount);
+        _mSpacing = Mathf.Max(0f, _mSpacing);
+        _mIntMaxValue = Mathf.Max(1, _mIntMaxValue);
+        _mFloatMaxValue = Mathf.Max(0.0001f, _mFloatMaxValue);
+        EnsureDrawMaskSize(true);
+        SetAllDirty();
+    }
+
+#if UNITY_EDITOR
+    protected override void OnValidate()
+    {
+        base.OnValidate();
+        _mSegmentCount = Mathf.Max(1, _mSegmentCount);
+        _mSpacing = Mathf.Max(0f, _mSpacing);
+        _mIntMaxValue = Mathf.Max(1, _mIntMaxValue);
+        _mFloatMaxValue = Mathf.Max(0.0001f, _mFloatMaxValue);
+        EnsureDrawMaskSize(true);
+        SetAllDirty();
+    }
+#endif
+
+    public bool GetSegmentVisible(int index)
+    {
+        if ((uint)index >= (uint)_mSegmentCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        EnsureDrawMaskSize(false);
+        int word = index >> 5;
+        int bit = index & 31;
+        return (_mDrawMaskWords[word] & (1 << bit)) != 0;
+    }
+
+    public void SetSegmentVisible(int index, bool visible)
+    {
+        if ((uint)index >= (uint)_mSegmentCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        EnsureDrawMaskSize(false);
+        int word = index >> 5;
+        int bit = index & 31;
+        int mask = 1 << bit;
+
+        if (visible)
+        {
+            _mDrawMaskWords[word] |= mask;
+        }
+        else
+        {
+            _mDrawMaskWords[word] &= ~mask;
+        }
+
+        SetAllDirty();
+    }
+
+    public void SetValue(int value, int maxValue)
+    {
+        ValueMode = ValueMode.Int;
+        INTMaxValue = maxValue;
+        INTValue = value;
+    }
+
+    public void SetValue(float value, float maxValue)
+    {
+        ValueMode = ValueMode.Float;
+        FloatMaxValue = maxValue;
+        FloatValue = value;
+    }
+
+    public override void SetNativeSize()
+    {
+        Sprite activeSprite = overrideSprite;
+
+        if (activeSprite == null)
+        {
+            return;
+        }
+
+        float width = activeSprite.rect.width / pixelsPerUnit;
+        float height = activeSprite.rect.height / pixelsPerUnit;
+        float gaps = _mSpacing * Mathf.Max(0, _mSegmentCount - 1);
+
+        if (IsHorizontal)
+        {
+            width = width * _mSegmentCount + gaps;
+        }
+        else
+        {
+            height = height * _mSegmentCount + gaps;
+        }
+
+        rectTransform.anchorMax = rectTransform.anchorMin;
+        rectTransform.sizeDelta = new Vector2(width, height);
+        SetAllDirty();
+    }
+
     public override void OnBeforeSerialize()
     {
         base.OnBeforeSerialize();
-        m_SerializationVersion = 1;
+        _mSerializationVersion = 1;
     }
 
     public override void OnAfterDeserialize()
     {
         base.OnAfterDeserialize();
 
-        if (m_SerializationVersion == 0)
+        if (_mSerializationVersion == 0)
         {
-            m_Direction = m_LegacyAxis == RectTransform.Axis.Horizontal
-                ? (m_LegacyFillInvert ? Slider.Direction.RightToLeft : Slider.Direction.LeftToRight)
-                : (m_LegacyFillInvert ? Slider.Direction.TopToBottom : Slider.Direction.BottomToTop);
-            m_SerializationVersion = 1;
+            _mDirection = _mLegacyAxis == RectTransform.Axis.Horizontal
+                              ? (_mLegacyFillInvert ? Slider.Direction.RightToLeft : Slider.Direction.LeftToRight)
+                              : (_mLegacyFillInvert ? Slider.Direction.TopToBottom : Slider.Direction.BottomToTop);
+            _mSerializationVersion = 1;
         }
 
-        m_SegmentCount = Mathf.Max(1, m_SegmentCount);
-        m_Spacing = Mathf.Max(0f, m_Spacing);
-        m_IntMaxValue = Mathf.Max(1, m_IntMaxValue);
-        m_FloatMaxValue = Mathf.Max(0.0001f, m_FloatMaxValue);
+        _mSegmentCount = Mathf.Max(1, _mSegmentCount);
+        _mSpacing = Mathf.Max(0f, _mSpacing);
+        _mIntMaxValue = Mathf.Max(1, _mIntMaxValue);
+        _mFloatMaxValue = Mathf.Max(0.0001f, _mFloatMaxValue);
         EnsureDrawMaskSize(true);
     }
 
@@ -353,20 +446,22 @@ public class SegmentedImage : Image
     {
         toFill.Clear();
 
-        int count = Mathf.Max(1, m_SegmentCount);
+        int count = Mathf.Max(1, _mSegmentCount);
         Rect fullRect = GetPixelAdjustedRect();
-        float totalSpacing = m_Spacing * Mathf.Max(0, count - 1);
+        float totalSpacing = _mSpacing * Mathf.Max(0, count - 1);
 
         float segmentSize = IsHorizontal
-            ? (fullRect.width - totalSpacing) / count
-            : (fullRect.height - totalSpacing) / count;
+                                ? (fullRect.width - totalSpacing) / count
+                                : (fullRect.height - totalSpacing) / count;
 
         if (segmentSize <= 0f)
+        {
             return;
+        }
 
         EnsureDrawMaskSize(false);
 
-        if (m_IsHandle)
+        if (_mIsHandle)
         {
             GenerateHandle(toFill, fullRect, count, segmentSize);
             return;
@@ -378,7 +473,9 @@ public class SegmentedImage : Image
         for (int slot = 0; slot < count; slot++)
         {
             if (!GetSegmentVisibleUnchecked(slot))
+            {
                 continue;
+            }
 
             Rect segmentRect = GetSegmentRect(fullRect, slot, segmentSize);
             int fillIndex = reverseSequence ? count - 1 - slot : slot;
@@ -388,8 +485,10 @@ public class SegmentedImage : Image
             {
                 if (segmentFill <= 0.000001f)
                 {
-                    if (m_EmptyColor.a > 0f)
-                        GenerateSegment(toFill, segmentRect, count, 1f, m_EmptyColor);
+                    if (_mEmptyColor.a > 0f)
+                    {
+                        GenerateSegment(toFill, segmentRect, count, 1f, _mEmptyColor);
+                    }
 
                     continue;
                 }
@@ -400,18 +499,30 @@ public class SegmentedImage : Image
                     continue;
                 }
 
-                if (m_EmptyColor.a > 0f)
-                    GenerateFilledComplement(toFill, segmentRect, segmentFill, m_EmptyColor);
+                if (_mEmptyColor.a > 0f)
+                {
+                    GenerateFilledComplement(toFill, segmentRect, segmentFill, _mEmptyColor);
+                }
 
                 GenerateSegment(toFill, segmentRect, count, segmentFill, color);
             }
             else
             {
-                Color segmentColor = segmentFill >= 0.999999f ? color : m_EmptyColor;
+                Color segmentColor = segmentFill >= 0.999999f ? color : _mEmptyColor;
+
                 if (segmentColor.a > 0f)
+                {
                     GenerateSegment(toFill, segmentRect, count, 1f, segmentColor);
+                }
             }
         }
+    }
+
+    private bool GetSegmentVisibleUnchecked(int index)
+    {
+        int word = index >> 5;
+        int bit = index & 31;
+        return (_mDrawMaskWords[word] & (1 << bit)) != 0;
     }
 
     private void GenerateHandle(VertexHelper vh, Rect fullRect, int count, float segmentSize)
@@ -420,19 +531,23 @@ public class SegmentedImage : Image
         int fillIndex = Mathf.Clamp(Mathf.CeilToInt(totalFill) - 1, 0, count - 1);
         float segmentFill = Mathf.Clamp01(totalFill - fillIndex);
         int handleSlot = IsFillSequenceReversed ? count - 1 - fillIndex : fillIndex;
-        bool drawEmpty = m_EmptyColor.a > 0f;
+        bool drawEmpty = _mEmptyColor.a > 0f;
 
         for (int slot = 0; slot < count; slot++)
         {
             if (!GetSegmentVisibleUnchecked(slot))
+            {
                 continue;
+            }
 
             Rect segmentRect = GetSegmentRect(fullRect, slot, segmentSize);
 
             if (slot != handleSlot)
             {
                 if (drawEmpty)
-                    GenerateSegment(vh, segmentRect, count, 1f, m_EmptyColor);
+                {
+                    GenerateSegment(vh, segmentRect, count, 1f, _mEmptyColor);
+                }
 
                 continue;
             }
@@ -446,7 +561,9 @@ public class SegmentedImage : Image
             if (segmentFill <= 0.000001f)
             {
                 if (drawEmpty)
-                    GenerateSegment(vh, segmentRect, count, 1f, m_EmptyColor);
+                {
+                    GenerateSegment(vh, segmentRect, count, 1f, _mEmptyColor);
+                }
 
                 continue;
             }
@@ -458,7 +575,9 @@ public class SegmentedImage : Image
             }
 
             if (drawEmpty)
-                GenerateFilledComplement(vh, segmentRect, segmentFill, m_EmptyColor);
+            {
+                GenerateFilledComplement(vh, segmentRect, segmentFill, _mEmptyColor);
+            }
 
             GenerateSegment(vh, segmentRect, count, segmentFill, color);
         }
@@ -471,9 +590,13 @@ public class SegmentedImage : Image
         if (activeSprite == null)
         {
             if (type == Type.Filled)
+            {
                 GenerateFilledSprite(vh, rect, preserveAspect, segmentFillAmount, renderColor);
+            }
             else
+            {
                 GenerateSimpleSprite(vh, rect, preserveAspect, renderColor);
+            }
 
             return;
         }
@@ -482,9 +605,14 @@ public class SegmentedImage : Image
         {
             case Type.Simple:
                 if (useSpriteMesh)
+                {
                     GenerateSprite(vh, rect, preserveAspect, renderColor);
+                }
                 else
+                {
                     GenerateSimpleSprite(vh, rect, preserveAspect, renderColor);
+                }
+
                 break;
             case Type.Sliced:
                 GenerateSlicedSprite(vh, rect, renderColor);
@@ -498,23 +626,15 @@ public class SegmentedImage : Image
         }
     }
 
-    private bool IsHorizontal =>
-        m_Direction == Slider.Direction.LeftToRight ||
-        m_Direction == Slider.Direction.RightToLeft;
-
-    private bool IsFillSequenceReversed =>
-        m_Direction == Slider.Direction.RightToLeft ||
-        m_Direction == Slider.Direction.TopToBottom;
-
     private Rect GetSegmentRect(Rect fullRect, int index, float segmentSize)
     {
         if (IsHorizontal)
         {
-            float x = fullRect.x + index * (segmentSize + m_Spacing);
+            float x = fullRect.x + index * (segmentSize + _mSpacing);
             return new Rect(x, fullRect.y, segmentSize, fullRect.height);
         }
 
-        float y = fullRect.y + index * (segmentSize + m_Spacing);
+        float y = fullRect.y + index * (segmentSize + _mSpacing);
         return new Rect(fullRect.x, y, fullRect.width, segmentSize);
     }
 
@@ -544,7 +664,9 @@ public class SegmentedImage : Image
         Vector2 pivotPosition = rect.position + Vector2.Scale(rectPivot, rect.size);
 
         if (shouldPreserveAspect && spriteSize.sqrMagnitude > 0f)
+        {
             PreserveSpriteAspectRatio(ref rect, spriteSize);
+        }
 
         Vector2 drawingSize = rect.size;
         Vector2 spriteBoundSize = activeSprite.bounds.size;
@@ -558,15 +680,18 @@ public class SegmentedImage : Image
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector2 position = new Vector2(
-                vertices[i].x / spriteBoundSize.x * drawingSize.x - drawOffset.x,
-                vertices[i].y / spriteBoundSize.y * drawingSize.y - drawOffset.y) + pivotPosition;
+                                           vertices[i].x / spriteBoundSize.x * drawingSize.x - drawOffset.x,
+                                           vertices[i].y / spriteBoundSize.y * drawingSize.y - drawOffset.y) + pivotPosition;
 
             vh.AddVert(position, color32, uvs[i]);
         }
 
         ushort[] triangles = activeSprite.triangles;
+
         for (int i = 0; i < triangles.Length; i += 3)
+        {
             vh.AddTriangle(start + triangles[i], start + triangles[i + 1], start + triangles[i + 2]);
+        }
     }
 
     private void GenerateSlicedSprite(VertexHelper vh, Rect rect, Color32 renderColor)
@@ -585,38 +710,46 @@ public class SegmentedImage : Image
         Vector4 adjustedBorders = GetAdjustedBorders(border / multipliedPixelsPerUnit, rect);
         padding /= multipliedPixelsPerUnit;
 
-        s_VertScratch[0] = new Vector2(padding.x, padding.y);
-        s_VertScratch[3] = new Vector2(rect.width - padding.z, rect.height - padding.w);
-        s_VertScratch[1] = new Vector2(adjustedBorders.x, adjustedBorders.y);
-        s_VertScratch[2] = new Vector2(rect.width - adjustedBorders.z, rect.height - adjustedBorders.w);
+        VertScratch[0] = new Vector2(padding.x, padding.y);
+        VertScratch[3] = new Vector2(rect.width - padding.z, rect.height - padding.w);
+        VertScratch[1] = new Vector2(adjustedBorders.x, adjustedBorders.y);
+        VertScratch[2] = new Vector2(rect.width - adjustedBorders.z, rect.height - adjustedBorders.w);
 
         for (int i = 0; i < 4; i++)
-            s_VertScratch[i] += rect.position;
+        {
+            VertScratch[i] += rect.position;
+        }
 
-        s_UVScratch[0] = new Vector2(outer.x, outer.y);
-        s_UVScratch[1] = new Vector2(inner.x, inner.y);
-        s_UVScratch[2] = new Vector2(inner.z, inner.w);
-        s_UVScratch[3] = new Vector2(outer.z, outer.w);
+        UVScratch[0] = new Vector2(outer.x, outer.y);
+        UVScratch[1] = new Vector2(inner.x, inner.y);
+        UVScratch[2] = new Vector2(inner.z, inner.w);
+        UVScratch[3] = new Vector2(outer.z, outer.w);
 
         for (int x = 0; x < 3; x++)
         {
             int x2 = x + 1;
+
             for (int y = 0; y < 3; y++)
             {
                 if (!fillCenter && x == 1 && y == 1)
+                {
                     continue;
+                }
 
                 int y2 = y + 1;
-                if (s_VertScratch[x2].x - s_VertScratch[x].x <= 0f || s_VertScratch[y2].y - s_VertScratch[y].y <= 0f)
+
+                if (VertScratch[x2].x - VertScratch[x].x <= 0f || VertScratch[y2].y - VertScratch[y].y <= 0f)
+                {
                     continue;
+                }
 
                 AddQuad(
-                    vh,
-                    new Vector2(s_VertScratch[x].x, s_VertScratch[y].y),
-                    new Vector2(s_VertScratch[x2].x, s_VertScratch[y2].y),
-                    renderColor,
-                    new Vector2(s_UVScratch[x].x, s_UVScratch[y].y),
-                    new Vector2(s_UVScratch[x2].x, s_UVScratch[y2].y));
+                        vh,
+                        new Vector2(VertScratch[x].x, VertScratch[y].y),
+                        new Vector2(VertScratch[x2].x, VertScratch[y2].y),
+                        renderColor,
+                        new Vector2(UVScratch[x].x, UVScratch[y].y),
+                        new Vector2(UVScratch[x2].x, UVScratch[y2].y));
             }
         }
     }
@@ -633,8 +766,8 @@ public class SegmentedImage : Image
 
         border = GetAdjustedBorders(border / multipliedPixelsPerUnit, rect);
 
-        Vector2 uvMin = new Vector2(inner.x, inner.y);
-        Vector2 uvMax = new Vector2(inner.z, inner.w);
+        Vector2 uvMin = new(inner.x, inner.y);
+        Vector2 uvMax = new(inner.z, inner.w);
         float xMin = border.x;
         float xMax = rect.width - border.z;
         float yMin = border.y;
@@ -642,11 +775,17 @@ public class SegmentedImage : Image
         Vector2 clipped = uvMax;
 
         if (tileWidth <= 0f)
+        {
             tileWidth = xMax - xMin;
-        if (tileHeight <= 0f)
-            tileHeight = yMax - yMin;
+        }
 
-        if (activeSprite != null && (hasBorder || activeSprite.packed || activeSprite.texture != null && activeSprite.texture.wrapMode != TextureWrapMode.Repeat))
+        if (tileHeight <= 0f)
+        {
+            tileHeight = yMax - yMin;
+        }
+
+        if (activeSprite != null && (hasBorder || activeSprite.packed ||
+                                     (activeSprite.texture != null && activeSprite.texture.wrapMode != TextureWrapMode.Repeat)))
         {
             long nTilesW = 0;
             long nTilesH = 0;
@@ -656,16 +795,18 @@ public class SegmentedImage : Image
             {
                 nTilesW = (long)Math.Ceiling((xMax - xMin) / tileWidth);
                 nTilesH = (long)Math.Ceiling((yMax - yMin) / tileHeight);
+
                 double nVertices = hasBorder
-                    ? (nTilesW + 2.0) * (nTilesH + 2.0) * 4.0
-                    : nTilesW * nTilesH * 4.0;
+                                       ? (nTilesW + 2.0) * (nTilesH + 2.0) * 4.0
+                                       : nTilesW * nTilesH * 4.0;
 
                 if (nVertices > maxVertices)
                 {
                     double maxTiles = maxVertices / 4.0;
+
                     double imageRatio = hasBorder
-                        ? (nTilesW + 2.0) / Math.Max(1.0, nTilesH + 2.0)
-                        : (double)nTilesW / Math.Max(1.0, nTilesH);
+                                            ? (nTilesW + 2.0) / Math.Max(1.0, nTilesH + 2.0)
+                                            : (double)nTilesW / Math.Max(1.0, nTilesH);
 
                     double targetTilesW = Math.Sqrt(maxTiles * imageRatio);
                     double targetTilesH = Math.Sqrt(maxTiles / imageRatio);
@@ -707,6 +848,7 @@ public class SegmentedImage : Image
                 {
                     float y1 = yMin + j * tileHeight;
                     float y2 = yMin + (j + 1) * tileHeight;
+
                     if (y2 > yMax)
                     {
                         clipped.y = uvMin.y + (uvMax.y - uvMin.y) * (yMax - y1) / (y2 - y1);
@@ -714,10 +856,12 @@ public class SegmentedImage : Image
                     }
 
                     clipped.x = uvMax.x;
+
                     for (long i = 0; i < nTilesW; i++)
                     {
                         float x1 = xMin + i * tileWidth;
                         float x2 = xMin + (i + 1) * tileWidth;
+
                         if (x2 > xMax)
                         {
                             clipped.x = uvMin.x + (uvMax.x - uvMin.x) * (xMax - x1) / (x2 - x1);
@@ -732,64 +876,94 @@ public class SegmentedImage : Image
             if (hasBorder)
             {
                 clipped = uvMax;
+
                 for (long j = 0; j < nTilesH; j++)
                 {
                     float y1 = yMin + j * tileHeight;
                     float y2 = yMin + (j + 1) * tileHeight;
+
                     if (y2 > yMax)
                     {
                         clipped.y = uvMin.y + (uvMax.y - uvMin.y) * (yMax - y1) / (y2 - y1);
                         y2 = yMax;
                     }
 
-                    AddQuad(vh, new Vector2(0f, y1) + rect.position, new Vector2(xMin, y2) + rect.position, renderColor, new Vector2(outer.x, uvMin.y), new Vector2(uvMin.x, clipped.y));
-                    AddQuad(vh, new Vector2(xMax, y1) + rect.position, new Vector2(rect.width, y2) + rect.position, renderColor, new Vector2(uvMax.x, uvMin.y), new Vector2(outer.z, clipped.y));
+                    AddQuad(vh, new Vector2(0f, y1) + rect.position, new Vector2(xMin, y2) + rect.position, renderColor,
+                            new Vector2(outer.x, uvMin.y), new Vector2(uvMin.x, clipped.y));
+
+                    AddQuad(vh, new Vector2(xMax, y1) + rect.position, new Vector2(rect.width, y2) + rect.position, renderColor,
+                            new Vector2(uvMax.x, uvMin.y), new Vector2(outer.z, clipped.y));
                 }
 
                 clipped = uvMax;
+
                 for (long i = 0; i < nTilesW; i++)
                 {
                     float x1 = xMin + i * tileWidth;
                     float x2 = xMin + (i + 1) * tileWidth;
+
                     if (x2 > xMax)
                     {
                         clipped.x = uvMin.x + (uvMax.x - uvMin.x) * (xMax - x1) / (x2 - x1);
                         x2 = xMax;
                     }
 
-                    AddQuad(vh, new Vector2(x1, 0f) + rect.position, new Vector2(x2, yMin) + rect.position, renderColor, new Vector2(uvMin.x, outer.y), new Vector2(clipped.x, uvMin.y));
-                    AddQuad(vh, new Vector2(x1, yMax) + rect.position, new Vector2(x2, rect.height) + rect.position, renderColor, new Vector2(uvMin.x, uvMax.y), new Vector2(clipped.x, outer.w));
+                    AddQuad(vh, new Vector2(x1, 0f) + rect.position, new Vector2(x2, yMin) + rect.position, renderColor,
+                            new Vector2(uvMin.x, outer.y), new Vector2(clipped.x, uvMin.y));
+
+                    AddQuad(vh, new Vector2(x1, yMax) + rect.position, new Vector2(x2, rect.height) + rect.position, renderColor,
+                            new Vector2(uvMin.x, uvMax.y), new Vector2(clipped.x, outer.w));
                 }
 
-                AddQuad(vh, new Vector2(0f, 0f) + rect.position, new Vector2(xMin, yMin) + rect.position, renderColor, new Vector2(outer.x, outer.y), new Vector2(uvMin.x, uvMin.y));
-                AddQuad(vh, new Vector2(xMax, 0f) + rect.position, new Vector2(rect.width, yMin) + rect.position, renderColor, new Vector2(uvMax.x, outer.y), new Vector2(outer.z, uvMin.y));
-                AddQuad(vh, new Vector2(0f, yMax) + rect.position, new Vector2(xMin, rect.height) + rect.position, renderColor, new Vector2(outer.x, uvMax.y), new Vector2(uvMin.x, outer.w));
-                AddQuad(vh, new Vector2(xMax, yMax) + rect.position, new Vector2(rect.width, rect.height) + rect.position, renderColor, new Vector2(uvMax.x, uvMax.y), new Vector2(outer.z, outer.w));
+                AddQuad(vh, new Vector2(0f, 0f) + rect.position, new Vector2(xMin, yMin) + rect.position, renderColor, new Vector2(outer.x, outer.y),
+                        new Vector2(uvMin.x, uvMin.y));
+
+                AddQuad(vh, new Vector2(xMax, 0f) + rect.position, new Vector2(rect.width, yMin) + rect.position, renderColor,
+                        new Vector2(uvMax.x, outer.y), new Vector2(outer.z, uvMin.y));
+
+                AddQuad(vh, new Vector2(0f, yMax) + rect.position, new Vector2(xMin, rect.height) + rect.position, renderColor,
+                        new Vector2(outer.x, uvMax.y), new Vector2(uvMin.x, outer.w));
+
+                AddQuad(vh, new Vector2(xMax, yMax) + rect.position, new Vector2(rect.width, rect.height) + rect.position, renderColor,
+                        new Vector2(uvMax.x, uvMax.y), new Vector2(outer.z, outer.w));
             }
         }
         else
         {
-            Vector2 uvScale = new Vector2((xMax - xMin) / tileWidth, (yMax - yMin) / tileHeight);
+            Vector2 uvScale = new((xMax - xMin) / tileWidth, (yMax - yMin) / tileHeight);
+
             if (fillCenter)
-                AddQuad(vh, new Vector2(xMin, yMin) + rect.position, new Vector2(xMax, yMax) + rect.position, renderColor, Vector2.Scale(uvMin, uvScale), Vector2.Scale(uvMax, uvScale));
+            {
+                AddQuad(vh, new Vector2(xMin, yMin) + rect.position, new Vector2(xMax, yMax) + rect.position, renderColor,
+                        Vector2.Scale(uvMin, uvScale), Vector2.Scale(uvMax, uvScale));
+            }
         }
     }
 
     private void GenerateFilledComplement(VertexHelper vh, Rect rect, float filledAmount, Color32 renderColor)
     {
         float emptyAmount = 1f - filledAmount;
+
         if (emptyAmount <= 0.000001f)
+        {
             return;
+        }
 
         int complementOrigin = fillOrigin;
         bool complementClockwise = fillClockwise;
 
         if (fillMethod == FillMethod.Horizontal)
+        {
             complementOrigin = fillOrigin == (int)OriginHorizontal.Left ? (int)OriginHorizontal.Right : (int)OriginHorizontal.Left;
+        }
         else if (fillMethod == FillMethod.Vertical)
+        {
             complementOrigin = fillOrigin == (int)OriginVertical.Bottom ? (int)OriginVertical.Top : (int)OriginVertical.Bottom;
+        }
         else
+        {
             complementClockwise = !fillClockwise;
+        }
 
         GenerateFilledSprite(vh, rect, preserveAspect, emptyAmount, renderColor, complementOrigin, complementClockwise);
     }
@@ -809,7 +983,9 @@ public class SegmentedImage : Image
         bool segmentFillClockwise)
     {
         if (segmentFillAmount < 0.001f)
+        {
             return;
+        }
 
         Vector4 v = GetDrawingDimensions(rect, shouldPreserveAspect);
         Sprite activeSprite = overrideSprite;
@@ -822,6 +998,7 @@ public class SegmentedImage : Image
         if (fillMethod == FillMethod.Horizontal)
         {
             float fill = (tx1 - tx0) * segmentFillAmount;
+
             if (segmentFillOrigin == (int)OriginHorizontal.Right)
             {
                 v.x = v.z - (v.z - v.x) * segmentFillAmount;
@@ -836,6 +1013,7 @@ public class SegmentedImage : Image
         else if (fillMethod == FillMethod.Vertical)
         {
             float fill = (ty1 - ty0) * segmentFillAmount;
+
             if (segmentFillOrigin == (int)OriginVertical.Top)
             {
                 v.y = v.w - (v.w - v.y) * segmentFillAmount;
@@ -848,22 +1026,24 @@ public class SegmentedImage : Image
             }
         }
 
-        s_Xy[0] = new Vector2(v.x, v.y);
-        s_Xy[1] = new Vector2(v.x, v.w);
-        s_Xy[2] = new Vector2(v.z, v.w);
-        s_Xy[3] = new Vector2(v.z, v.y);
+        XY[0] = new Vector2(v.x, v.y);
+        XY[1] = new Vector2(v.x, v.w);
+        XY[2] = new Vector2(v.z, v.w);
+        XY[3] = new Vector2(v.z, v.y);
 
-        s_Uv[0] = new Vector2(tx0, ty0);
-        s_Uv[1] = new Vector2(tx0, ty1);
-        s_Uv[2] = new Vector2(tx1, ty1);
-        s_Uv[3] = new Vector2(tx1, ty0);
+        UV[0] = new Vector2(tx0, ty0);
+        UV[1] = new Vector2(tx0, ty1);
+        UV[2] = new Vector2(tx1, ty1);
+        UV[3] = new Vector2(tx1, ty0);
 
         if (segmentFillAmount < 1f && fillMethod != FillMethod.Horizontal && fillMethod != FillMethod.Vertical)
         {
             if (fillMethod == FillMethod.Radial90)
             {
-                if (RadialCut(s_Xy, s_Uv, segmentFillAmount, segmentFillClockwise, segmentFillOrigin))
-                    AddQuad(vh, s_Xy, renderColor, s_Uv);
+                if (RadialCut(XY, UV, segmentFillAmount, segmentFillClockwise, segmentFillOrigin))
+                {
+                    AddQuad(vh, XY, renderColor, UV);
+                }
             }
             else if (fillMethod == FillMethod.Radial180)
             {
@@ -879,6 +1059,7 @@ public class SegmentedImage : Image
                     {
                         fy0 = 0f;
                         fy1 = 1f;
+
                         if (side == even)
                         {
                             fx0 = 0f;
@@ -894,6 +1075,7 @@ public class SegmentedImage : Image
                     {
                         fx0 = 0f;
                         fx1 = 1f;
+
                         if (side == even)
                         {
                             fy0 = 0.5f;
@@ -909,8 +1091,10 @@ public class SegmentedImage : Image
                     SetRadialQuad(v, tx0, tx1, ty0, ty1, fx0, fx1, fy0, fy1);
                     float val = segmentFillClockwise ? segmentFillAmount * 2f - side : segmentFillAmount * 2f - (1 - side);
 
-                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), segmentFillClockwise, (side + segmentFillOrigin + 3) % 4))
-                        AddQuad(vh, s_Xy, renderColor, s_Uv);
+                    if (RadialCut(XY, UV, Mathf.Clamp01(val), segmentFillClockwise, (side + segmentFillOrigin + 3) % 4))
+                    {
+                        AddQuad(vh, XY, renderColor, UV);
+                    }
                 }
             }
             else if (fillMethod == FillMethod.Radial360)
@@ -925,41 +1109,20 @@ public class SegmentedImage : Image
                     SetRadialQuad(v, tx0, tx1, ty0, ty1, fx0, fx1, fy0, fy1);
 
                     float val = segmentFillClockwise
-                        ? segmentFillAmount * 4f - ((corner + segmentFillOrigin) % 4)
-                        : segmentFillAmount * 4f - (3 - ((corner + segmentFillOrigin) % 4));
+                                    ? segmentFillAmount * 4f - ((corner + segmentFillOrigin) % 4)
+                                    : segmentFillAmount * 4f - (3 - ((corner + segmentFillOrigin) % 4));
 
-                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), segmentFillClockwise, (corner + 2) % 4))
-                        AddQuad(vh, s_Xy, renderColor, s_Uv);
+                    if (RadialCut(XY, UV, Mathf.Clamp01(val), segmentFillClockwise, (corner + 2) % 4))
+                    {
+                        AddQuad(vh, XY, renderColor, UV);
+                    }
                 }
             }
         }
         else
         {
-            AddQuad(vh, s_Xy, renderColor, s_Uv);
+            AddQuad(vh, XY, renderColor, UV);
         }
-    }
-
-    private static void SetRadialQuad(Vector4 v, float tx0, float tx1, float ty0, float ty1, float fx0, float fx1, float fy0, float fy1)
-    {
-        s_Xy[0].x = Mathf.Lerp(v.x, v.z, fx0);
-        s_Xy[1].x = s_Xy[0].x;
-        s_Xy[2].x = Mathf.Lerp(v.x, v.z, fx1);
-        s_Xy[3].x = s_Xy[2].x;
-
-        s_Xy[0].y = Mathf.Lerp(v.y, v.w, fy0);
-        s_Xy[1].y = Mathf.Lerp(v.y, v.w, fy1);
-        s_Xy[2].y = s_Xy[1].y;
-        s_Xy[3].y = s_Xy[0].y;
-
-        s_Uv[0].x = Mathf.Lerp(tx0, tx1, fx0);
-        s_Uv[1].x = s_Uv[0].x;
-        s_Uv[2].x = Mathf.Lerp(tx0, tx1, fx1);
-        s_Uv[3].x = s_Uv[2].x;
-
-        s_Uv[0].y = Mathf.Lerp(ty0, ty1, fy0);
-        s_Uv[1].y = Mathf.Lerp(ty0, ty1, fy1);
-        s_Uv[2].y = s_Uv[1].y;
-        s_Uv[3].y = s_Uv[0].y;
     }
 
     private Vector4 GetDrawingDimensions(Rect rect, bool shouldPreserveAspect)
@@ -971,21 +1134,23 @@ public class SegmentedImage : Image
         int spriteH = Mathf.RoundToInt(size.y);
 
         Vector4 v = spriteW > 0 && spriteH > 0
-            ? new Vector4(
-                padding.x / spriteW,
-                padding.y / spriteH,
-                (spriteW - padding.z) / spriteW,
-                (spriteH - padding.w) / spriteH)
-            : new Vector4(0f, 0f, 1f, 1f);
+                        ? new Vector4(
+                                      padding.x / spriteW,
+                                      padding.y / spriteH,
+                                      (spriteW - padding.z) / spriteW,
+                                      (spriteH - padding.w) / spriteH)
+                        : new Vector4(0f, 0f, 1f, 1f);
 
         if (shouldPreserveAspect && size.sqrMagnitude > 0f)
+        {
             PreserveSpriteAspectRatio(ref rect, size);
+        }
 
         return new Vector4(
-            rect.x + rect.width * v.x,
-            rect.y + rect.height * v.y,
-            rect.x + rect.width * v.z,
-            rect.y + rect.height * v.w);
+                           rect.x + rect.width * v.x,
+                           rect.y + rect.height * v.y,
+                           rect.x + rect.width * v.z,
+                           rect.y + rect.height * v.w);
     }
 
     private void PreserveSpriteAspectRatio(ref Rect rect, Vector2 spriteSize)
@@ -1015,13 +1180,14 @@ public class SegmentedImage : Image
         for (int axisIndex = 0; axisIndex <= 1; axisIndex++)
         {
             float borderScaleRatio = originalRect.size[axisIndex] != 0f
-                ? pixelRect.size[axisIndex] / originalRect.size[axisIndex]
-                : 1f;
+                                         ? pixelRect.size[axisIndex] / originalRect.size[axisIndex]
+                                         : 1f;
 
             border[axisIndex] *= borderScaleRatio;
             border[axisIndex + 2] *= borderScaleRatio;
 
             float combinedBorders = border[axisIndex] + border[axisIndex + 2];
+
             if (adjustedRect.size[axisIndex] < combinedBorders && combinedBorders != 0f)
             {
                 float fitScale = adjustedRect.size[axisIndex] / combinedBorders;
@@ -1033,20 +1199,80 @@ public class SegmentedImage : Image
         return border;
     }
 
+    private void EnsureDrawMaskSize(bool newBitsVisible)
+    {
+        int requiredWords = WordCountFor(Mathf.Max(1, _mSegmentCount));
+        int oldLength = _mDrawMaskWords?.Length ?? 0;
+
+        if (oldLength == requiredWords)
+        {
+            return;
+        }
+
+        int[] newWords = new int[requiredWords];
+
+        if (_mDrawMaskWords != null)
+        {
+            Array.Copy(_mDrawMaskWords, newWords, Math.Min(oldLength, requiredWords));
+        }
+
+        if (newBitsVisible && requiredWords > oldLength)
+        {
+            for (int i = oldLength; i < requiredWords; i++)
+            {
+                newWords[i] = -1;
+            }
+        }
+
+        _mDrawMaskWords = newWords;
+    }
+
+    private static void SetRadialQuad(Vector4 v, float tx0, float tx1, float ty0, float ty1, float fx0, float fx1, float fy0, float fy1)
+    {
+        XY[0].x = Mathf.Lerp(v.x, v.z, fx0);
+        XY[1].x = XY[0].x;
+        XY[2].x = Mathf.Lerp(v.x, v.z, fx1);
+        XY[3].x = XY[2].x;
+
+        XY[0].y = Mathf.Lerp(v.y, v.w, fy0);
+        XY[1].y = Mathf.Lerp(v.y, v.w, fy1);
+        XY[2].y = XY[1].y;
+        XY[3].y = XY[0].y;
+
+        UV[0].x = Mathf.Lerp(tx0, tx1, fx0);
+        UV[1].x = UV[0].x;
+        UV[2].x = Mathf.Lerp(tx0, tx1, fx1);
+        UV[3].x = UV[2].x;
+
+        UV[0].y = Mathf.Lerp(ty0, ty1, fy0);
+        UV[1].y = Mathf.Lerp(ty0, ty1, fy1);
+        UV[2].y = UV[1].y;
+        UV[3].y = UV[0].y;
+    }
+
     private static bool RadialCut(Vector3[] xy, Vector3[] uv, float fill, bool invert, int corner)
     {
         if (fill < 0.001f)
+        {
             return false;
+        }
 
         if ((corner & 1) == 1)
+        {
             invert = !invert;
+        }
 
         if (!invert && fill > 0.999f)
+        {
             return true;
+        }
 
         float angle = Mathf.Clamp01(fill);
+
         if (invert)
+        {
             angle = 1f - angle;
+        }
 
         angle *= 90f * Mathf.Deg2Rad;
         float cos = Mathf.Cos(angle);
@@ -1095,9 +1321,13 @@ public class SegmentedImage : Image
             }
 
             if (!invert)
+            {
                 xy[i3].x = Mathf.Lerp(xy[i0].x, xy[i2].x, cos);
+            }
             else
+            {
                 xy[i1].y = Mathf.Lerp(xy[i0].y, xy[i2].y, sin);
+            }
         }
         else
         {
@@ -1130,9 +1360,13 @@ public class SegmentedImage : Image
             }
 
             if (invert)
+            {
                 xy[i3].y = Mathf.Lerp(xy[i0].y, xy[i2].y, sin);
+            }
             else
+            {
                 xy[i1].x = Mathf.Lerp(xy[i0].x, xy[i2].x, cos);
+            }
         }
     }
 
@@ -1141,7 +1375,9 @@ public class SegmentedImage : Image
         int start = vertexHelper.currentVertCount;
 
         for (int i = 0; i < 4; i++)
+        {
             vertexHelper.AddVert(positions[i], quadColor, uvs[i]);
+        }
 
         vertexHelper.AddTriangle(start, start + 1, start + 2);
         vertexHelper.AddTriangle(start + 2, start + 3, start);
@@ -1160,55 +1396,10 @@ public class SegmentedImage : Image
         vertexHelper.AddTriangle(start + 2, start + 3, start);
     }
 
-    private void EnsureDrawMaskSize(bool newBitsVisible)
-    {
-        int requiredWords = WordCountFor(Mathf.Max(1, m_SegmentCount));
-        int oldLength = m_DrawMaskWords?.Length ?? 0;
-
-        if (oldLength == requiredWords)
-            return;
-
-        int[] newWords = new int[requiredWords];
-        if (m_DrawMaskWords != null)
-            Array.Copy(m_DrawMaskWords, newWords, Math.Min(oldLength, requiredWords));
-
-        if (newBitsVisible && requiredWords > oldLength)
-        {
-            for (int i = oldLength; i < requiredWords; i++)
-                newWords[i] = -1;
-        }
-
-        m_DrawMaskWords = newWords;
-    }
-
     private static int WordCountFor(int bitCount)
     {
         return (bitCount + 31) >> 5;
     }
-
-    protected override void OnDidApplyAnimationProperties()
-    {
-        base.OnDidApplyAnimationProperties();
-        m_SegmentCount = Mathf.Max(1, m_SegmentCount);
-        m_Spacing = Mathf.Max(0f, m_Spacing);
-        m_IntMaxValue = Mathf.Max(1, m_IntMaxValue);
-        m_FloatMaxValue = Mathf.Max(0.0001f, m_FloatMaxValue);
-        EnsureDrawMaskSize(true);
-        SetAllDirty();
-    }
-
-#if UNITY_EDITOR
-    protected override void OnValidate()
-    {
-        base.OnValidate();
-        m_SegmentCount = Mathf.Max(1, m_SegmentCount);
-        m_Spacing = Mathf.Max(0f, m_Spacing);
-        m_IntMaxValue = Mathf.Max(1, m_IntMaxValue);
-        m_FloatMaxValue = Mathf.Max(0.0001f, m_FloatMaxValue);
-        EnsureDrawMaskSize(true);
-        SetAllDirty();
-    }
-#endif
 }
 
 #if UNITY_EDITOR
@@ -1218,113 +1409,81 @@ namespace UnityEditor.UI
     [CanEditMultipleObjects]
     public class SegmentedImageEditor : GraphicEditor
     {
-        private SerializedProperty m_FillMethod;
-        private SerializedProperty m_FillOrigin;
-        private SerializedProperty m_FillAmount;
-        private SerializedProperty m_FillClockwise;
-        private SerializedProperty m_Type;
-        private SerializedProperty m_FillCenter;
-        private SerializedProperty m_Sprite;
-        private SerializedProperty m_PreserveAspect;
-        private SerializedProperty m_UseSpriteMesh;
-        private SerializedProperty m_PixelsPerUnitMultiplier;
-        private SerializedProperty m_SegmentCount;
-        private SerializedProperty m_Spacing;
-        private SerializedProperty m_Direction;
-        private SerializedProperty m_DrawMaskWords;
-        private SerializedProperty m_ValueMode;
-        private SerializedProperty m_IntMaxValue;
-        private SerializedProperty m_FloatMaxValue;
-        private SerializedProperty m_EmptyColor;
-        private SerializedProperty m_IsHandle;
-        private SerializedProperty m_Script;
-        private GUIContent m_SpriteContent;
-        private GUIContent m_SpriteTypeContent;
-        private GUIContent m_ClockwiseContent;
-        private AnimBool m_ShowSlicedOrTiled;
-        private AnimBool m_ShowSliced;
-        private AnimBool m_ShowTiled;
-        private AnimBool m_ShowFilled;
-        private bool m_IsDriven;
-
-        private static class Styles
+        private static readonly int[] SOriginValues2 =
         {
-            public static readonly GUIContent FillOrigin = EditorGUIUtility.TrTextContent("Fill Origin");
-            public static readonly GUIContent[] OriginHorizontal =
-            {
-                EditorGUIUtility.TrTextContent("Left"),
-                EditorGUIUtility.TrTextContent("Right")
-            };
-
-            public static readonly GUIContent[] OriginVertical =
-            {
-                EditorGUIUtility.TrTextContent("Bottom"),
-                EditorGUIUtility.TrTextContent("Top")
-            };
-
-            public static readonly GUIContent[] Origin90 =
-            {
-                EditorGUIUtility.TrTextContent("BottomLeft"),
-                EditorGUIUtility.TrTextContent("TopLeft"),
-                EditorGUIUtility.TrTextContent("TopRight"),
-                EditorGUIUtility.TrTextContent("BottomRight")
-            };
-
-            public static readonly GUIContent[] Origin180 =
-            {
-                EditorGUIUtility.TrTextContent("Bottom"),
-                EditorGUIUtility.TrTextContent("Left"),
-                EditorGUIUtility.TrTextContent("Top"),
-                EditorGUIUtility.TrTextContent("Right")
-            };
-
-            public static readonly GUIContent[] Origin360 =
-            {
-                EditorGUIUtility.TrTextContent("Bottom"),
-                EditorGUIUtility.TrTextContent("Right"),
-                EditorGUIUtility.TrTextContent("Top"),
-                EditorGUIUtility.TrTextContent("Left")
-            };
-        }
+            0, 1
+        };
+        private static readonly int[] SOriginValues4 =
+        {
+            0, 1, 2, 3
+        };
+        private SerializedProperty _mFillMethod;
+        private SerializedProperty _mFillOrigin;
+        private SerializedProperty _mFillAmount;
+        private SerializedProperty _mFillClockwise;
+        private SerializedProperty _mType;
+        private SerializedProperty _mFillCenter;
+        private SerializedProperty _mSprite;
+        private SerializedProperty _mPreserveAspect;
+        private SerializedProperty _mUseSpriteMesh;
+        private SerializedProperty _mPixelsPerUnitMultiplier;
+        private SerializedProperty _mSegmentCount;
+        private SerializedProperty _mSpacing;
+        private SerializedProperty _mDirection;
+        private SerializedProperty _mDrawMaskWords;
+        private SerializedProperty _mValueMode;
+        private SerializedProperty _mIntMaxValue;
+        private SerializedProperty _mFloatMaxValue;
+        private SerializedProperty _mEmptyColor;
+        private SerializedProperty _mIsHandle;
+        private SerializedProperty _mScript;
+        private GUIContent _mSpriteContent;
+        private GUIContent _mSpriteTypeContent;
+        private GUIContent _mClockwiseContent;
+        private AnimBool _mShowSlicedOrTiled;
+        private AnimBool _mShowSliced;
+        private AnimBool _mShowTiled;
+        private AnimBool _mShowFilled;
+        private bool _mIsDriven;
 
         protected override void OnEnable()
         {
             base.OnEnable();
 
-            m_SpriteContent = EditorGUIUtility.TrTextContent("Source Image");
-            m_SpriteTypeContent = EditorGUIUtility.TrTextContent("Image Type");
-            m_ClockwiseContent = EditorGUIUtility.TrTextContent("Clockwise");
+            _mSpriteContent = EditorGUIUtility.TrTextContent("Source Image");
+            _mSpriteTypeContent = EditorGUIUtility.TrTextContent("Image Type");
+            _mClockwiseContent = EditorGUIUtility.TrTextContent("Clockwise");
 
-            m_Sprite = serializedObject.FindProperty("m_Sprite");
-            m_Type = serializedObject.FindProperty("m_Type");
-            m_FillCenter = serializedObject.FindProperty("m_FillCenter");
-            m_FillMethod = serializedObject.FindProperty("m_FillMethod");
-            m_FillOrigin = serializedObject.FindProperty("m_FillOrigin");
-            m_FillClockwise = serializedObject.FindProperty("m_FillClockwise");
-            m_FillAmount = serializedObject.FindProperty("m_FillAmount");
-            m_PreserveAspect = serializedObject.FindProperty("m_PreserveAspect");
-            m_UseSpriteMesh = serializedObject.FindProperty("m_UseSpriteMesh");
-            m_PixelsPerUnitMultiplier = serializedObject.FindProperty("m_PixelsPerUnitMultiplier");
-            m_SegmentCount = serializedObject.FindProperty("m_SegmentCount");
-            m_Spacing = serializedObject.FindProperty("m_Spacing");
-            m_Direction = serializedObject.FindProperty("m_Direction");
-            m_DrawMaskWords = serializedObject.FindProperty("m_DrawMaskWords");
-            m_ValueMode = serializedObject.FindProperty("m_ValueMode");
-            m_IntMaxValue = serializedObject.FindProperty("m_IntMaxValue");
-            m_FloatMaxValue = serializedObject.FindProperty("m_FloatMaxValue");
-            m_EmptyColor = serializedObject.FindProperty("m_EmptyColor");
-            m_IsHandle = serializedObject.FindProperty("m_IsHandle");
-            m_Script = serializedObject.FindProperty("m_Script");
+            _mSprite = serializedObject.FindProperty("m_Sprite");
+            _mType = serializedObject.FindProperty("m_Type");
+            _mFillCenter = serializedObject.FindProperty("m_FillCenter");
+            _mFillMethod = serializedObject.FindProperty("m_FillMethod");
+            _mFillOrigin = serializedObject.FindProperty("m_FillOrigin");
+            _mFillClockwise = serializedObject.FindProperty("m_FillClockwise");
+            _mFillAmount = serializedObject.FindProperty("m_FillAmount");
+            _mPreserveAspect = serializedObject.FindProperty("m_PreserveAspect");
+            _mUseSpriteMesh = serializedObject.FindProperty("m_UseSpriteMesh");
+            _mPixelsPerUnitMultiplier = serializedObject.FindProperty("m_PixelsPerUnitMultiplier");
+            _mSegmentCount = serializedObject.FindProperty("_mSegmentCount");
+            _mSpacing = serializedObject.FindProperty("_mSpacing");
+            _mDirection = serializedObject.FindProperty("_mDirection");
+            _mDrawMaskWords = serializedObject.FindProperty("_mDrawMaskWords");
+            _mValueMode = serializedObject.FindProperty("_mValueMode");
+            _mIntMaxValue = serializedObject.FindProperty("_mIntMaxValue");
+            _mFloatMaxValue = serializedObject.FindProperty("_mFloatMaxValue");
+            _mEmptyColor = serializedObject.FindProperty("_mEmptyColor");
+            _mIsHandle = serializedObject.FindProperty("_mIsHandle");
+            _mScript = serializedObject.FindProperty("m_Script");
 
-            var typeEnum = (Image.Type)m_Type.enumValueIndex;
-            m_ShowSlicedOrTiled = new AnimBool(!m_Type.hasMultipleDifferentValues && (typeEnum == Image.Type.Sliced || typeEnum == Image.Type.Tiled));
-            m_ShowSliced = new AnimBool(!m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Sliced);
-            m_ShowTiled = new AnimBool(!m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Tiled);
-            m_ShowFilled = new AnimBool(!m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Filled);
-            m_ShowSlicedOrTiled.valueChanged.AddListener(Repaint);
-            m_ShowSliced.valueChanged.AddListener(Repaint);
-            m_ShowTiled.valueChanged.AddListener(Repaint);
-            m_ShowFilled.valueChanged.AddListener(Repaint);
+            Image.Type typeEnum = (Image.Type)_mType.enumValueIndex;
+            _mShowSlicedOrTiled = new AnimBool(!_mType.hasMultipleDifferentValues && (typeEnum == Image.Type.Sliced || typeEnum == Image.Type.Tiled));
+            _mShowSliced = new AnimBool(!_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Sliced);
+            _mShowTiled = new AnimBool(!_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Tiled);
+            _mShowFilled = new AnimBool(!_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Filled);
+            _mShowSlicedOrTiled.valueChanged.AddListener(Repaint);
+            _mShowSliced.valueChanged.AddListener(Repaint);
+            _mShowTiled.valueChanged.AddListener(Repaint);
+            _mShowFilled.valueChanged.AddListener(Repaint);
 
             SetShowNativeSize(true);
         }
@@ -1332,10 +1491,10 @@ namespace UnityEditor.UI
         protected override void OnDisable()
         {
             base.OnDisable();
-            m_ShowSlicedOrTiled.valueChanged.RemoveListener(Repaint);
-            m_ShowSliced.valueChanged.RemoveListener(Repaint);
-            m_ShowTiled.valueChanged.RemoveListener(Repaint);
-            m_ShowFilled.valueChanged.RemoveListener(Repaint);
+            _mShowSlicedOrTiled.valueChanged.RemoveListener(Repaint);
+            _mShowSliced.valueChanged.RemoveListener(Repaint);
+            _mShowTiled.valueChanged.RemoveListener(Repaint);
+            _mShowFilled.valueChanged.RemoveListener(Repaint);
         }
 
         public override void OnInspectorGUI()
@@ -1344,17 +1503,19 @@ namespace UnityEditor.UI
 
             using (new EditorGUI.DisabledScope(true))
             {
-                if (m_Script != null)
-                    EditorGUILayout.PropertyField(m_Script);
+                if (_mScript != null)
+                {
+                    EditorGUILayout.PropertyField(_mScript);
+                }
             }
 
-            var image = (SegmentedImage)target;
+            SegmentedImage image = (SegmentedImage)target;
             RectTransform rect = image.GetComponent<RectTransform>();
-            m_IsDriven = (rect.drivenByObject as Slider)?.fillRect == rect;
+            _mIsDriven = (rect.drivenByObject as Slider)?.fillRect == rect;
 
             SpriteGUI();
             AppearanceControlsGUI();
-            EditorGUILayout.PropertyField(m_EmptyColor, new GUIContent("Empty Color"));
+            EditorGUILayout.PropertyField(_mEmptyColor, new GUIContent("Empty Color"));
             RaycastControlsGUI();
             MaskableControlsGUI();
             SegmentsGUI();
@@ -1362,16 +1523,20 @@ namespace UnityEditor.UI
             TypeGUI();
 
             SetShowNativeSize(false);
+
             if (EditorGUILayout.BeginFadeGroup(m_ShowNativeSize.faded))
             {
                 EditorGUI.indentLevel++;
 
-                if ((Image.Type)m_Type.enumValueIndex == Image.Type.Simple)
-                    EditorGUILayout.PropertyField(m_UseSpriteMesh);
+                if ((Image.Type)_mType.enumValueIndex == Image.Type.Simple)
+                {
+                    EditorGUILayout.PropertyField(_mUseSpriteMesh);
+                }
 
-                EditorGUILayout.PropertyField(m_PreserveAspect);
+                EditorGUILayout.PropertyField(_mPreserveAspect);
                 EditorGUI.indentLevel--;
             }
+
             EditorGUILayout.EndFadeGroup();
 
             NativeSizeButtonGUI();
@@ -1381,7 +1546,9 @@ namespace UnityEditor.UI
                 foreach (UnityEngine.Object obj in targets)
                 {
                     if (obj is SegmentedImage segmentedImage)
+                    {
                         segmentedImage.SetAllDirty();
+                    }
                 }
             }
         }
@@ -1390,10 +1557,10 @@ namespace UnityEditor.UI
         {
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Segments", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(m_Direction, new GUIContent("Direction"));
-            EditorGUILayout.PropertyField(m_IsHandle, new GUIContent("Is Handle"));
-            EditorGUILayout.PropertyField(m_SegmentCount, new GUIContent("Count"));
-            EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing (px)"));
+            EditorGUILayout.PropertyField(_mDirection, new GUIContent("Direction"));
+            EditorGUILayout.PropertyField(_mIsHandle, new GUIContent("Is Handle"));
+            EditorGUILayout.PropertyField(_mSegmentCount, new GUIContent("Count"));
+            EditorGUILayout.PropertyField(_mSpacing, new GUIContent("Spacing (px)"));
             DrawMaskGUI();
 
             EditorGUILayout.Space();
@@ -1404,77 +1571,104 @@ namespace UnityEditor.UI
         private void SpriteGUI()
         {
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(m_Sprite, m_SpriteContent);
-            if (!EditorGUI.EndChangeCheck())
-                return;
+            EditorGUILayout.PropertyField(_mSprite, _mSpriteContent);
 
-            var newSprite = m_Sprite.objectReferenceValue as Sprite;
+            if (!EditorGUI.EndChangeCheck())
+            {
+                return;
+            }
+
+            Sprite newSprite = _mSprite.objectReferenceValue as Sprite;
+
             if (newSprite)
             {
-                Image.Type oldType = (Image.Type)m_Type.enumValueIndex;
+                Image.Type oldType = (Image.Type)_mType.enumValueIndex;
+
                 if (newSprite.border.sqrMagnitude > 0f)
-                    m_Type.enumValueIndex = (int)Image.Type.Sliced;
+                {
+                    _mType.enumValueIndex = (int)Image.Type.Sliced;
+                }
                 else if (oldType == Image.Type.Sliced)
-                    m_Type.enumValueIndex = (int)Image.Type.Simple;
+                {
+                    _mType.enumValueIndex = (int)Image.Type.Simple;
+                }
             }
 
             foreach (UnityEngine.Object obj in targets)
+            {
                 ((Image)obj).DisableSpriteOptimizations();
+            }
         }
 
         private void TypeGUI()
         {
-            EditorGUILayout.PropertyField(m_Type, m_SpriteTypeContent);
+            EditorGUILayout.PropertyField(_mType, _mSpriteTypeContent);
             EditorGUI.indentLevel++;
 
-            Image.Type typeEnum = (Image.Type)m_Type.enumValueIndex;
-            bool showSlicedOrTiled = !m_Type.hasMultipleDifferentValues && (typeEnum == Image.Type.Sliced || typeEnum == Image.Type.Tiled);
+            Image.Type typeEnum = (Image.Type)_mType.enumValueIndex;
+            bool showSlicedOrTiled = !_mType.hasMultipleDifferentValues && (typeEnum == Image.Type.Sliced || typeEnum == Image.Type.Tiled);
 
             if (showSlicedOrTiled)
+            {
                 showSlicedOrTiled = AllSpritesHaveBorder();
+            }
 
-            m_ShowSlicedOrTiled.target = showSlicedOrTiled;
-            m_ShowSliced.target = showSlicedOrTiled && !m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Sliced;
-            m_ShowTiled.target = showSlicedOrTiled && !m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Tiled;
-            m_ShowFilled.target = !m_Type.hasMultipleDifferentValues && typeEnum == Image.Type.Filled;
+            _mShowSlicedOrTiled.target = showSlicedOrTiled;
+            _mShowSliced.target = showSlicedOrTiled && !_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Sliced;
+            _mShowTiled.target = showSlicedOrTiled && !_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Tiled;
+            _mShowFilled.target = !_mType.hasMultipleDifferentValues && typeEnum == Image.Type.Filled;
 
-            Sprite sprite = m_Sprite.hasMultipleDifferentValues ? null : m_Sprite.objectReferenceValue as Sprite;
+            Sprite sprite = _mSprite.hasMultipleDifferentValues ? null : _mSprite.objectReferenceValue as Sprite;
             bool hasBorder = sprite != null && sprite.border.sqrMagnitude > 0f;
 
-            if (EditorGUILayout.BeginFadeGroup(m_ShowSlicedOrTiled.faded))
+            if (EditorGUILayout.BeginFadeGroup(_mShowSlicedOrTiled.faded))
             {
                 if (hasBorder)
-                    EditorGUILayout.PropertyField(m_FillCenter);
-                EditorGUILayout.PropertyField(m_PixelsPerUnitMultiplier);
+                {
+                    EditorGUILayout.PropertyField(_mFillCenter);
+                }
+
+                EditorGUILayout.PropertyField(_mPixelsPerUnitMultiplier);
             }
+
             EditorGUILayout.EndFadeGroup();
 
-            if (EditorGUILayout.BeginFadeGroup(m_ShowSliced.faded))
+            if (EditorGUILayout.BeginFadeGroup(_mShowSliced.faded))
             {
                 if (sprite != null && !hasBorder)
-                    EditorGUILayout.HelpBox("This Image doesn't have a border.", MessageType.Warning);
-            }
-            EditorGUILayout.EndFadeGroup();
-
-            if (EditorGUILayout.BeginFadeGroup(m_ShowTiled.faded))
-            {
-                if (sprite != null && !hasBorder &&
-                    (sprite.texture != null && sprite.texture.wrapMode != TextureWrapMode.Repeat || sprite.packed))
                 {
-                    EditorGUILayout.HelpBox("It looks like you want to tile a sprite with no border. It would be more efficient to remove this Sprite from any SpriteAtlas and set the Wrap mode to Repeat.", MessageType.Warning);
+                    EditorGUILayout.HelpBox("This Image doesn't have a border.", MessageType.Warning);
                 }
             }
+
             EditorGUILayout.EndFadeGroup();
 
-            if (EditorGUILayout.BeginFadeGroup(m_ShowFilled.faded))
+            if (EditorGUILayout.BeginFadeGroup(_mShowTiled.faded))
+            {
+                if (sprite != null && !hasBorder &&
+                    ((sprite.texture != null && sprite.texture.wrapMode != TextureWrapMode.Repeat) || sprite.packed))
+                {
+                    EditorGUILayout
+                        .HelpBox("It looks like you want to tile a sprite with no border. It would be more efficient to remove this Sprite from any SpriteAtlas and set the Wrap mode to Repeat.",
+                                 MessageType.Warning);
+                }
+            }
+
+            EditorGUILayout.EndFadeGroup();
+
+            if (EditorGUILayout.BeginFadeGroup(_mShowFilled.faded))
             {
                 EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(m_FillMethod);
+                EditorGUILayout.PropertyField(_mFillMethod);
+
                 if (EditorGUI.EndChangeCheck())
-                    m_FillOrigin.intValue = 0;
+                {
+                    _mFillOrigin.intValue = 0;
+                }
 
                 Rect shapeRect = EditorGUILayout.GetControlRect(true);
-                switch ((Image.FillMethod)m_FillMethod.enumValueIndex)
+
+                switch ((Image.FillMethod)_mFillMethod.enumValueIndex)
                 {
                     case Image.FillMethod.Horizontal:
                         DrawFillOriginPopup(shapeRect, Styles.OriginHorizontal);
@@ -1493,9 +1687,12 @@ namespace UnityEditor.UI
                         break;
                 }
 
-                if ((Image.FillMethod)m_FillMethod.enumValueIndex > Image.FillMethod.Vertical)
-                    EditorGUILayout.PropertyField(m_FillClockwise, m_ClockwiseContent);
+                if ((Image.FillMethod)_mFillMethod.enumValueIndex > Image.FillMethod.Vertical)
+                {
+                    EditorGUILayout.PropertyField(_mFillClockwise, _mClockwiseContent);
+                }
             }
+
             EditorGUILayout.EndFadeGroup();
 
             EditorGUI.indentLevel--;
@@ -1505,78 +1702,187 @@ namespace UnityEditor.UI
         {
             foreach (UnityEngine.Object obj in targets)
             {
-                var targetSerializedObject = new SerializedObject(obj);
+                SerializedObject targetSerializedObject = new(obj);
                 SerializedProperty spriteProperty = targetSerializedObject.FindProperty("m_Sprite");
                 Sprite sprite = spriteProperty.objectReferenceValue as Sprite;
+
                 if (sprite == null || sprite.border.sqrMagnitude <= 0f)
+                {
                     return false;
+                }
             }
 
             return true;
         }
 
-        private static readonly int[] s_OriginValues2 = { 0, 1 };
-        private static readonly int[] s_OriginValues4 = { 0, 1, 2, 3 };
-
         private void DrawFillOriginPopup(Rect rect, GUIContent[] options)
         {
-            int[] values = options.Length == 2 ? s_OriginValues2 : s_OriginValues4;
-            EditorGUI.IntPopup(rect, m_FillOrigin, options, values, Styles.FillOrigin);
+            int[] values = options.Length == 2 ? SOriginValues2 : SOriginValues4;
+            EditorGUI.IntPopup(rect, _mFillOrigin, options, values, Styles.FillOrigin);
         }
 
         private void DrawValueGUI()
         {
-            if (m_IsDriven)
+            if (_mIsDriven)
+            {
                 EditorGUILayout.HelpBox("The Fill Amount property is driven by Slider.", MessageType.None);
+            }
 
-            using (new EditorGUI.DisabledScope(m_IsDriven))
-                EditorGUILayout.PropertyField(m_FillAmount, new GUIContent("Fill Amount"));
+            using (new EditorGUI.DisabledScope(_mIsDriven))
+            {
+                EditorGUILayout.PropertyField(_mFillAmount, new GUIContent("Fill Amount"));
+            }
 
-            EditorGUILayout.PropertyField(m_ValueMode, new GUIContent("Value Type"));
+            EditorGUILayout.PropertyField(_mValueMode, new GUIContent("Value Type"));
 
-            if (m_ValueMode.hasMultipleDifferentValues)
+            if (_mValueMode.hasMultipleDifferentValues)
+            {
                 return;
+            }
 
-            if ((SegmentedImage.ValueMode)m_ValueMode.enumValueIndex == SegmentedImage.ValueMode.Int)
+            if ((ValueMode)_mValueMode.enumValueIndex == ValueMode.Int)
+            {
                 DrawIntValueGUI();
+            }
             else
+            {
                 DrawFloatValueGUI();
+            }
         }
 
         private void DrawIntValueGUI()
         {
-            int oldMax = Mathf.Max(1, m_IntMaxValue.intValue);
-            int currentValue = Mathf.Clamp(Mathf.RoundToInt(m_FillAmount.floatValue * oldMax), 0, oldMax);
+            int oldMax = Mathf.Max(1, _mIntMaxValue.intValue);
+            int currentValue = Mathf.Clamp(Mathf.RoundToInt(_mFillAmount.floatValue * oldMax), 0, oldMax);
 
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(m_IntMaxValue, new GUIContent("Max Value"));
+            EditorGUILayout.PropertyField(_mIntMaxValue, new GUIContent("Max Value"));
+
             if (EditorGUI.EndChangeCheck())
             {
-                m_IntMaxValue.intValue = Mathf.Max(1, m_IntMaxValue.intValue);
-                int newMax = m_IntMaxValue.intValue;
-                m_FillAmount.floatValue = Mathf.Clamp(currentValue, 0, newMax) / (float)newMax;
+                _mIntMaxValue.intValue = Mathf.Max(1, _mIntMaxValue.intValue);
+                int newMax = _mIntMaxValue.intValue;
+                _mFillAmount.floatValue = Mathf.Clamp(currentValue, 0, newMax) / (float)newMax;
             }
 
-            int maxValue = Mathf.Max(1, m_IntMaxValue.intValue);
-            DrawIntFillAmountSlider(m_FillAmount, maxValue, m_IsDriven);
+            int maxValue = Mathf.Max(1, _mIntMaxValue.intValue);
+            DrawIntFillAmountSlider(_mFillAmount, maxValue, _mIsDriven);
         }
 
         private void DrawFloatValueGUI()
         {
-            float oldMax = Mathf.Max(0.0001f, m_FloatMaxValue.floatValue);
-            float currentValue = Mathf.Clamp(m_FillAmount.floatValue * oldMax, 0f, oldMax);
+            float oldMax = Mathf.Max(0.0001f, _mFloatMaxValue.floatValue);
+            float currentValue = Mathf.Clamp(_mFillAmount.floatValue * oldMax, 0f, oldMax);
 
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(m_FloatMaxValue, new GUIContent("Max Value"));
+            EditorGUILayout.PropertyField(_mFloatMaxValue, new GUIContent("Max Value"));
+
             if (EditorGUI.EndChangeCheck())
             {
-                m_FloatMaxValue.floatValue = Mathf.Max(0.0001f, m_FloatMaxValue.floatValue);
-                float newMax = m_FloatMaxValue.floatValue;
-                m_FillAmount.floatValue = Mathf.Clamp(currentValue, 0f, newMax) / newMax;
+                _mFloatMaxValue.floatValue = Mathf.Max(0.0001f, _mFloatMaxValue.floatValue);
+                float newMax = _mFloatMaxValue.floatValue;
+                _mFillAmount.floatValue = Mathf.Clamp(currentValue, 0f, newMax) / newMax;
             }
 
-            float maxValue = Mathf.Max(0.0001f, m_FloatMaxValue.floatValue);
-            DrawFloatFillAmountSlider(m_FillAmount, maxValue, m_IsDriven);
+            float maxValue = Mathf.Max(0.0001f, _mFloatMaxValue.floatValue);
+            DrawFloatFillAmountSlider(_mFillAmount, maxValue, _mIsDriven);
+        }
+
+        private void DrawMaskGUI()
+        {
+            if (serializedObject.isEditingMultipleObjects)
+            {
+                EditorGUILayout.HelpBox("Draw Mask can be edited with one SegmentedImage selected.", MessageType.None);
+                return;
+            }
+
+            int count = Mathf.Max(1, _mSegmentCount.intValue);
+            const float BUTTON_WIDTH = 28f;
+            float availableWidth = Mathf.Max(1f, EditorGUIUtility.currentViewWidth - 42f);
+            int perRow = Mathf.Max(1, Mathf.FloorToInt(availableWidth / BUTTON_WIDTH));
+
+            EditorGUILayout.LabelField("Draw Mask");
+
+            for (int rowStart = 0; rowStart < count; rowStart += perRow)
+            {
+                EditorGUILayout.BeginHorizontal();
+                int rowEnd = Mathf.Min(count, rowStart + perRow);
+
+                for (int i = rowStart; i < rowEnd; i++)
+                {
+                    bool visible = GetMaskBit(i);
+                    bool newVisible = GUILayout.Toggle(visible, i.ToString(), EditorStyles.miniButton, GUILayout.Width(BUTTON_WIDTH));
+
+                    if (newVisible != visible)
+                    {
+                        SetMaskBit(i, newVisible);
+                    }
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
+
+            EditorGUILayout.BeginHorizontal();
+
+            if (GUILayout.Button("All"))
+            {
+                SetAllMaskBits(count, true);
+            }
+
+            if (GUILayout.Button("None"))
+            {
+                SetAllMaskBits(count, false);
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private bool GetMaskBit(int index)
+        {
+            int wordIndex = index >> 5;
+
+            if (wordIndex >= _mDrawMaskWords.arraySize)
+            {
+                return true;
+            }
+
+            int word = _mDrawMaskWords.GetArrayElementAtIndex(wordIndex).intValue;
+            return (word & (1 << (index & 31))) != 0;
+        }
+
+        private void SetMaskBit(int index, bool value)
+        {
+            int wordIndex = index >> 5;
+
+            while (_mDrawMaskWords.arraySize <= wordIndex)
+            {
+                int newIndex = _mDrawMaskWords.arraySize;
+                _mDrawMaskWords.arraySize = newIndex + 1;
+                _mDrawMaskWords.GetArrayElementAtIndex(newIndex).intValue = -1;
+            }
+
+            SerializedProperty wordProperty = _mDrawMaskWords.GetArrayElementAtIndex(wordIndex);
+            int mask = 1 << (index & 31);
+            int word = wordProperty.intValue;
+            wordProperty.intValue = value ? word | mask : word & ~mask;
+        }
+
+        private void SetAllMaskBits(int count, bool value)
+        {
+            int wordCount = (count + 31) >> 5;
+            _mDrawMaskWords.arraySize = wordCount;
+
+            for (int i = 0; i < wordCount; i++)
+            {
+                _mDrawMaskWords.GetArrayElementAtIndex(i).intValue = value ? -1 : 0;
+            }
+        }
+
+        private void SetShowNativeSize(bool instant)
+        {
+            Image.Type type = (Image.Type)_mType.enumValueIndex;
+            bool showNativeSize = (type == Image.Type.Simple || type == Image.Type.Filled) && _mSprite.objectReferenceValue != null;
+            base.SetShowNativeSize(showNativeSize, instant);
         }
 
         private static void DrawIntFillAmountSlider(SerializedProperty fillAmount, int maxValue, bool isDriven)
@@ -1594,8 +1900,11 @@ namespace UnityEditor.UI
 
                 EditorGUI.BeginChangeCheck();
                 int newValue = EditorGUI.IntSlider(rect, label, value, 0, maxValue);
+
                 if (EditorGUI.EndChangeCheck())
+                {
                     fillAmount.floatValue = newValue / (float)maxValue;
+                }
             }
 
             EditorGUI.showMixedValue = oldMixedValue;
@@ -1617,94 +1926,48 @@ namespace UnityEditor.UI
 
                 EditorGUI.BeginChangeCheck();
                 float newValue = EditorGUI.Slider(rect, label, value, 0f, maxValue);
+
                 if (EditorGUI.EndChangeCheck())
+                {
                     fillAmount.floatValue = newValue / maxValue;
+                }
             }
 
             EditorGUI.showMixedValue = oldMixedValue;
             EditorGUI.EndProperty();
         }
 
-        private void DrawMaskGUI()
+        private static class Styles
         {
-            if (serializedObject.isEditingMultipleObjects)
+            public static readonly GUIContent FillOrigin = EditorGUIUtility.TrTextContent("Fill Origin");
+            public static readonly GUIContent[] OriginHorizontal =
             {
-                EditorGUILayout.HelpBox("Draw Mask can be edited with one SegmentedImage selected.", MessageType.None);
-                return;
-            }
+                EditorGUIUtility.TrTextContent("Left"), EditorGUIUtility.TrTextContent("Right")
+            };
 
-            int count = Mathf.Max(1, m_SegmentCount.intValue);
-            const float buttonWidth = 28f;
-            float availableWidth = Mathf.Max(1f, EditorGUIUtility.currentViewWidth - 42f);
-            int perRow = Mathf.Max(1, Mathf.FloorToInt(availableWidth / buttonWidth));
-
-            EditorGUILayout.LabelField("Draw Mask");
-
-            for (int rowStart = 0; rowStart < count; rowStart += perRow)
+            public static readonly GUIContent[] OriginVertical =
             {
-                EditorGUILayout.BeginHorizontal();
-                int rowEnd = Mathf.Min(count, rowStart + perRow);
+                EditorGUIUtility.TrTextContent("Bottom"), EditorGUIUtility.TrTextContent("Top")
+            };
 
-                for (int i = rowStart; i < rowEnd; i++)
-                {
-                    bool visible = GetMaskBit(i);
-                    bool newVisible = GUILayout.Toggle(visible, i.ToString(), EditorStyles.miniButton, GUILayout.Width(buttonWidth));
-                    if (newVisible != visible)
-                        SetMaskBit(i, newVisible);
-                }
-
-                EditorGUILayout.EndHorizontal();
-            }
-
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("All"))
-                SetAllMaskBits(count, true);
-            if (GUILayout.Button("None"))
-                SetAllMaskBits(count, false);
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private bool GetMaskBit(int index)
-        {
-            int wordIndex = index >> 5;
-            if (wordIndex >= m_DrawMaskWords.arraySize)
-                return true;
-
-            int word = m_DrawMaskWords.GetArrayElementAtIndex(wordIndex).intValue;
-            return (word & (1 << (index & 31))) != 0;
-        }
-
-        private void SetMaskBit(int index, bool value)
-        {
-            int wordIndex = index >> 5;
-            while (m_DrawMaskWords.arraySize <= wordIndex)
+            public static readonly GUIContent[] Origin90 =
             {
-                int newIndex = m_DrawMaskWords.arraySize;
-                m_DrawMaskWords.arraySize = newIndex + 1;
-                m_DrawMaskWords.GetArrayElementAtIndex(newIndex).intValue = -1;
-            }
+                EditorGUIUtility.TrTextContent("BottomLeft"), EditorGUIUtility.TrTextContent("TopLeft"), EditorGUIUtility.TrTextContent("TopRight"),
+                EditorGUIUtility.TrTextContent("BottomRight")
+            };
 
-            SerializedProperty wordProperty = m_DrawMaskWords.GetArrayElementAtIndex(wordIndex);
-            int mask = 1 << (index & 31);
-            int word = wordProperty.intValue;
-            wordProperty.intValue = value ? word | mask : word & ~mask;
+            public static readonly GUIContent[] Origin180 =
+            {
+                EditorGUIUtility.TrTextContent("Bottom"), EditorGUIUtility.TrTextContent("Left"), EditorGUIUtility.TrTextContent("Top"),
+                EditorGUIUtility.TrTextContent("Right")
+            };
+
+            public static readonly GUIContent[] Origin360 =
+            {
+                EditorGUIUtility.TrTextContent("Bottom"), EditorGUIUtility.TrTextContent("Right"), EditorGUIUtility.TrTextContent("Top"),
+                EditorGUIUtility.TrTextContent("Left")
+            };
         }
-
-        private void SetAllMaskBits(int count, bool value)
-        {
-            int wordCount = (count + 31) >> 5;
-            m_DrawMaskWords.arraySize = wordCount;
-            for (int i = 0; i < wordCount; i++)
-                m_DrawMaskWords.GetArrayElementAtIndex(i).intValue = value ? -1 : 0;
-        }
-
-        private void SetShowNativeSize(bool instant)
-        {
-            Image.Type type = (Image.Type)m_Type.enumValueIndex;
-            bool showNativeSize = (type == Image.Type.Simple || type == Image.Type.Filled) && m_Sprite.objectReferenceValue != null;
-            base.SetShowNativeSize(showNativeSize, instant);
-        }
-
     }
 }
 #endif
