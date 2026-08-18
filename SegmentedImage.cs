@@ -25,30 +25,20 @@ public class SegmentedImage : Image
     private static readonly Vector3[] XY = new Vector3[4];
     private static readonly Vector3[] UV = new Vector3[4];
 
-    [FormerlySerializedAs("m_SegmentCount")]
     [SerializeField] [Min(1)] private int _mSegmentCount = 5;
-    [FormerlySerializedAs("m_Spacing")]
     [SerializeField] [Min(0f)] private float _mSpacing = 2f;
-    [FormerlySerializedAs("m_Direction")]
     [SerializeField] private Slider.Direction _mDirection = Slider.Direction.LeftToRight;
-    [FormerlySerializedAs("m_EmptyColor")]
     [SerializeField] private Color _mEmptyColor = Color.clear;
-    [FormerlySerializedAs("m_IsHandle")]
     [SerializeField] private bool _mIsHandle;
-    [FormerlySerializedAs("m_DrawMaskWords")]
     [SerializeField] private int[] _mDrawMaskWords =
     {
         -1
     };
-    [FormerlySerializedAs("m_ValueMode")]
     [SerializeField] private ValueMode _mValueMode = ValueMode.Float;
-    [SerializeField] [HideInInspector] [FormerlySerializedAs("m_Axis")] private RectTransform.Axis _mLegacyAxis = RectTransform.Axis.Horizontal;
-    [SerializeField] [HideInInspector] [FormerlySerializedAs("m_FillInvert")] private bool _mLegacyFillInvert;
-    [FormerlySerializedAs("m_SerializationVersion")]
+    [SerializeField] [HideInInspector] private RectTransform.Axis _mLegacyAxis = RectTransform.Axis.Horizontal;
+    [SerializeField] [HideInInspector] private bool _mLegacyFillInvert;
     [SerializeField] [HideInInspector] private int _mSerializationVersion;
-    [FormerlySerializedAs("m_IntMaxValue")]
     [SerializeField] [Min(1)] private int _mIntMaxValue = 5;
-    [FormerlySerializedAs("m_FloatMaxValue")]
     [SerializeField] [Min(0.0001f)] private float _mFloatMaxValue = 1f;
 
     public int SegmentCount
