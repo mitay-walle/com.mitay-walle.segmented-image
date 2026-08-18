@@ -22,6 +22,8 @@ public class SegmentedImage : Image
     [SerializeField, Min(1)] private int m_SegmentCount = 5;
     [SerializeField, Min(0f)] private float m_Spacing = 2f;
     [SerializeField] private Slider.Direction m_Direction = Slider.Direction.LeftToRight;
+    [SerializeField] private Color m_EmptyColor = Color.clear;
+    [SerializeField] private bool m_IsHandle;
     [SerializeField] private int[] m_DrawMaskWords = { -1 };
     [SerializeField] private ValueMode m_ValueMode = ValueMode.Float;
     [SerializeField, HideInInspector, FormerlySerializedAs("m_Axis")] private RectTransform.Axis m_LegacyAxis = RectTransform.Axis.Horizontal;
@@ -83,6 +85,32 @@ public class SegmentedImage : Image
         set => direction = value == RectTransform.Axis.Horizontal
             ? Slider.Direction.LeftToRight
             : Slider.Direction.BottomToTop;
+    }
+
+    public Color emptyColor
+    {
+        get => m_EmptyColor;
+        set
+        {
+            if (m_EmptyColor == value)
+                return;
+
+            m_EmptyColor = value;
+            SetAllDirty();
+        }
+    }
+
+    public bool IsHandle
+    {
+        get => m_IsHandle;
+        set
+        {
+            if (m_IsHandle == value)
+                return;
+
+            m_IsHandle = value;
+            SetAllDirty();
+        }
     }
 
     public ValueMode valueMode
@@ -337,7 +365,13 @@ public class SegmentedImage : Image
             return;
 
         EnsureDrawMaskSize(false);
-        Sprite activeSprite = overrideSprite;
+
+        if (m_IsHandle)
+        {
+            GenerateHandle(toFill, fullRect, count, segmentSize);
+            return;
+        }
+
         bool reverseSequence = IsFillSequenceReversed;
         float totalFill = Mathf.Clamp01(fillAmount) * count;
 
@@ -350,33 +384,117 @@ public class SegmentedImage : Image
             int fillIndex = reverseSequence ? count - 1 - slot : slot;
             float segmentFill = Mathf.Clamp01(totalFill - fillIndex);
 
-            if (type != Type.Filled && segmentFill < 0.999999f)
+            if (type == Type.Filled)
+            {
+                if (segmentFill <= 0.000001f)
+                {
+                    if (m_EmptyColor.a > 0f)
+                        GenerateSegment(toFill, segmentRect, count, 1f, m_EmptyColor);
+
+                    continue;
+                }
+
+                if (segmentFill >= 0.999999f)
+                {
+                    GenerateSegment(toFill, segmentRect, count, 1f, color);
+                    continue;
+                }
+
+                if (m_EmptyColor.a > 0f)
+                    GenerateFilledComplement(toFill, segmentRect, segmentFill, m_EmptyColor);
+
+                GenerateSegment(toFill, segmentRect, count, segmentFill, color);
+            }
+            else
+            {
+                Color segmentColor = segmentFill >= 0.999999f ? color : m_EmptyColor;
+                if (segmentColor.a > 0f)
+                    GenerateSegment(toFill, segmentRect, count, 1f, segmentColor);
+            }
+        }
+    }
+
+    private void GenerateHandle(VertexHelper vh, Rect fullRect, int count, float segmentSize)
+    {
+        float totalFill = Mathf.Clamp01(fillAmount) * count;
+        int fillIndex = Mathf.Clamp(Mathf.CeilToInt(totalFill) - 1, 0, count - 1);
+        float segmentFill = Mathf.Clamp01(totalFill - fillIndex);
+        int handleSlot = IsFillSequenceReversed ? count - 1 - fillIndex : fillIndex;
+        bool drawEmpty = m_EmptyColor.a > 0f;
+
+        for (int slot = 0; slot < count; slot++)
+        {
+            if (!GetSegmentVisibleUnchecked(slot))
                 continue;
 
-            if (activeSprite == null)
+            Rect segmentRect = GetSegmentRect(fullRect, slot, segmentSize);
+
+            if (slot != handleSlot)
             {
-                AddQuad(toFill, segmentRect.min, segmentRect.max, color, Vector2.zero, Vector2.zero);
+                if (drawEmpty)
+                    GenerateSegment(vh, segmentRect, count, 1f, m_EmptyColor);
+
                 continue;
             }
 
-            switch (type)
+            if (type != Type.Filled)
             {
-                case Type.Simple:
-                    if (useSpriteMesh)
-                        GenerateSprite(toFill, segmentRect, preserveAspect);
-                    else
-                        GenerateSimpleSprite(toFill, segmentRect, preserveAspect);
-                    break;
-                case Type.Sliced:
-                    GenerateSlicedSprite(toFill, segmentRect);
-                    break;
-                case Type.Tiled:
-                    GenerateTiledSprite(toFill, segmentRect, count);
-                    break;
-                case Type.Filled:
-                    GenerateFilledSprite(toFill, segmentRect, preserveAspect, segmentFill);
-                    break;
+                GenerateSegment(vh, segmentRect, count, 1f, color);
+                continue;
             }
+
+            if (segmentFill <= 0.000001f)
+            {
+                if (drawEmpty)
+                    GenerateSegment(vh, segmentRect, count, 1f, m_EmptyColor);
+
+                continue;
+            }
+
+            if (segmentFill >= 0.999999f)
+            {
+                GenerateSegment(vh, segmentRect, count, 1f, color);
+                continue;
+            }
+
+            if (drawEmpty)
+                GenerateFilledComplement(vh, segmentRect, segmentFill, m_EmptyColor);
+
+            GenerateSegment(vh, segmentRect, count, segmentFill, color);
+        }
+    }
+
+    private void GenerateSegment(VertexHelper vh, Rect rect, int segmentCountForBudget, float segmentFillAmount, Color32 renderColor)
+    {
+        Sprite activeSprite = overrideSprite;
+
+        if (activeSprite == null)
+        {
+            if (type == Type.Filled)
+                GenerateFilledSprite(vh, rect, preserveAspect, segmentFillAmount, renderColor);
+            else
+                GenerateSimpleSprite(vh, rect, preserveAspect, renderColor);
+
+            return;
+        }
+
+        switch (type)
+        {
+            case Type.Simple:
+                if (useSpriteMesh)
+                    GenerateSprite(vh, rect, preserveAspect, renderColor);
+                else
+                    GenerateSimpleSprite(vh, rect, preserveAspect, renderColor);
+                break;
+            case Type.Sliced:
+                GenerateSlicedSprite(vh, rect, renderColor);
+                break;
+            case Type.Tiled:
+                GenerateTiledSprite(vh, rect, segmentCountForBudget, renderColor);
+                break;
+            case Type.Filled:
+                GenerateFilledSprite(vh, rect, preserveAspect, segmentFillAmount, renderColor);
+                break;
         }
     }
 
@@ -400,11 +518,12 @@ public class SegmentedImage : Image
         return new Rect(fullRect.x, y, fullRect.width, segmentSize);
     }
 
-    private void GenerateSimpleSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect)
+    private void GenerateSimpleSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect, Color32 renderColor)
     {
         Vector4 v = GetDrawingDimensions(rect, shouldPreserveAspect);
-        Vector4 uv = DataUtility.GetOuterUV(overrideSprite);
-        Color32 color32 = color;
+        Sprite activeSprite = overrideSprite;
+        Vector4 uv = activeSprite != null ? DataUtility.GetOuterUV(activeSprite) : new Vector4(0f, 0f, 1f, 1f);
+        Color32 color32 = renderColor;
 
         vh.AddVert(new Vector3(v.x, v.y), color32, new Vector2(uv.x, uv.y));
         vh.AddVert(new Vector3(v.x, v.w), color32, new Vector2(uv.x, uv.w));
@@ -416,7 +535,7 @@ public class SegmentedImage : Image
         vh.AddTriangle(start + 2, start + 3, start);
     }
 
-    private void GenerateSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect)
+    private void GenerateSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect, Color32 renderColor)
     {
         Sprite activeSprite = overrideSprite;
         Vector2 spriteSize = activeSprite.rect.size;
@@ -430,7 +549,7 @@ public class SegmentedImage : Image
         Vector2 drawingSize = rect.size;
         Vector2 spriteBoundSize = activeSprite.bounds.size;
         Vector2 drawOffset = (rectPivot - spritePivot) * drawingSize;
-        Color32 color32 = color;
+        Color32 color32 = renderColor;
         int start = vh.currentVertCount;
 
         Vector2[] vertices = activeSprite.vertices;
@@ -450,11 +569,11 @@ public class SegmentedImage : Image
             vh.AddTriangle(start + triangles[i], start + triangles[i + 1], start + triangles[i + 2]);
     }
 
-    private void GenerateSlicedSprite(VertexHelper vh, Rect rect)
+    private void GenerateSlicedSprite(VertexHelper vh, Rect rect, Color32 renderColor)
     {
         if (!hasBorder)
         {
-            GenerateSimpleSprite(vh, rect, false);
+            GenerateSimpleSprite(vh, rect, false, renderColor);
             return;
         }
 
@@ -495,14 +614,14 @@ public class SegmentedImage : Image
                     vh,
                     new Vector2(s_VertScratch[x].x, s_VertScratch[y].y),
                     new Vector2(s_VertScratch[x2].x, s_VertScratch[y2].y),
-                    color,
+                    renderColor,
                     new Vector2(s_UVScratch[x].x, s_UVScratch[y].y),
                     new Vector2(s_UVScratch[x2].x, s_UVScratch[y2].y));
             }
         }
     }
 
-    private void GenerateTiledSprite(VertexHelper vh, Rect rect, int segmentCountForBudget)
+    private void GenerateTiledSprite(VertexHelper vh, Rect rect, int segmentCountForBudget, Color32 renderColor)
     {
         Sprite activeSprite = overrideSprite;
         Vector4 outer = DataUtility.GetOuterUV(activeSprite);
@@ -605,7 +724,7 @@ public class SegmentedImage : Image
                             x2 = xMax;
                         }
 
-                        AddQuad(vh, new Vector2(x1, y1) + rect.position, new Vector2(x2, y2) + rect.position, color, uvMin, clipped);
+                        AddQuad(vh, new Vector2(x1, y1) + rect.position, new Vector2(x2, y2) + rect.position, renderColor, uvMin, clipped);
                     }
                 }
             }
@@ -623,8 +742,8 @@ public class SegmentedImage : Image
                         y2 = yMax;
                     }
 
-                    AddQuad(vh, new Vector2(0f, y1) + rect.position, new Vector2(xMin, y2) + rect.position, color, new Vector2(outer.x, uvMin.y), new Vector2(uvMin.x, clipped.y));
-                    AddQuad(vh, new Vector2(xMax, y1) + rect.position, new Vector2(rect.width, y2) + rect.position, color, new Vector2(uvMax.x, uvMin.y), new Vector2(outer.z, clipped.y));
+                    AddQuad(vh, new Vector2(0f, y1) + rect.position, new Vector2(xMin, y2) + rect.position, renderColor, new Vector2(outer.x, uvMin.y), new Vector2(uvMin.x, clipped.y));
+                    AddQuad(vh, new Vector2(xMax, y1) + rect.position, new Vector2(rect.width, y2) + rect.position, renderColor, new Vector2(uvMax.x, uvMin.y), new Vector2(outer.z, clipped.y));
                 }
 
                 clipped = uvMax;
@@ -638,31 +757,63 @@ public class SegmentedImage : Image
                         x2 = xMax;
                     }
 
-                    AddQuad(vh, new Vector2(x1, 0f) + rect.position, new Vector2(x2, yMin) + rect.position, color, new Vector2(uvMin.x, outer.y), new Vector2(clipped.x, uvMin.y));
-                    AddQuad(vh, new Vector2(x1, yMax) + rect.position, new Vector2(x2, rect.height) + rect.position, color, new Vector2(uvMin.x, uvMax.y), new Vector2(clipped.x, outer.w));
+                    AddQuad(vh, new Vector2(x1, 0f) + rect.position, new Vector2(x2, yMin) + rect.position, renderColor, new Vector2(uvMin.x, outer.y), new Vector2(clipped.x, uvMin.y));
+                    AddQuad(vh, new Vector2(x1, yMax) + rect.position, new Vector2(x2, rect.height) + rect.position, renderColor, new Vector2(uvMin.x, uvMax.y), new Vector2(clipped.x, outer.w));
                 }
 
-                AddQuad(vh, new Vector2(0f, 0f) + rect.position, new Vector2(xMin, yMin) + rect.position, color, new Vector2(outer.x, outer.y), new Vector2(uvMin.x, uvMin.y));
-                AddQuad(vh, new Vector2(xMax, 0f) + rect.position, new Vector2(rect.width, yMin) + rect.position, color, new Vector2(uvMax.x, outer.y), new Vector2(outer.z, uvMin.y));
-                AddQuad(vh, new Vector2(0f, yMax) + rect.position, new Vector2(xMin, rect.height) + rect.position, color, new Vector2(outer.x, uvMax.y), new Vector2(uvMin.x, outer.w));
-                AddQuad(vh, new Vector2(xMax, yMax) + rect.position, new Vector2(rect.width, rect.height) + rect.position, color, new Vector2(uvMax.x, uvMax.y), new Vector2(outer.z, outer.w));
+                AddQuad(vh, new Vector2(0f, 0f) + rect.position, new Vector2(xMin, yMin) + rect.position, renderColor, new Vector2(outer.x, outer.y), new Vector2(uvMin.x, uvMin.y));
+                AddQuad(vh, new Vector2(xMax, 0f) + rect.position, new Vector2(rect.width, yMin) + rect.position, renderColor, new Vector2(uvMax.x, outer.y), new Vector2(outer.z, uvMin.y));
+                AddQuad(vh, new Vector2(0f, yMax) + rect.position, new Vector2(xMin, rect.height) + rect.position, renderColor, new Vector2(outer.x, uvMax.y), new Vector2(uvMin.x, outer.w));
+                AddQuad(vh, new Vector2(xMax, yMax) + rect.position, new Vector2(rect.width, rect.height) + rect.position, renderColor, new Vector2(uvMax.x, uvMax.y), new Vector2(outer.z, outer.w));
             }
         }
         else
         {
             Vector2 uvScale = new Vector2((xMax - xMin) / tileWidth, (yMax - yMin) / tileHeight);
             if (fillCenter)
-                AddQuad(vh, new Vector2(xMin, yMin) + rect.position, new Vector2(xMax, yMax) + rect.position, color, Vector2.Scale(uvMin, uvScale), Vector2.Scale(uvMax, uvScale));
+                AddQuad(vh, new Vector2(xMin, yMin) + rect.position, new Vector2(xMax, yMax) + rect.position, renderColor, Vector2.Scale(uvMin, uvScale), Vector2.Scale(uvMax, uvScale));
         }
     }
 
-    private void GenerateFilledSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect, float segmentFillAmount)
+    private void GenerateFilledComplement(VertexHelper vh, Rect rect, float filledAmount, Color32 renderColor)
+    {
+        float emptyAmount = 1f - filledAmount;
+        if (emptyAmount <= 0.000001f)
+            return;
+
+        int complementOrigin = fillOrigin;
+        bool complementClockwise = fillClockwise;
+
+        if (fillMethod == FillMethod.Horizontal)
+            complementOrigin = fillOrigin == (int)OriginHorizontal.Left ? (int)OriginHorizontal.Right : (int)OriginHorizontal.Left;
+        else if (fillMethod == FillMethod.Vertical)
+            complementOrigin = fillOrigin == (int)OriginVertical.Bottom ? (int)OriginVertical.Top : (int)OriginVertical.Bottom;
+        else
+            complementClockwise = !fillClockwise;
+
+        GenerateFilledSprite(vh, rect, preserveAspect, emptyAmount, renderColor, complementOrigin, complementClockwise);
+    }
+
+    private void GenerateFilledSprite(VertexHelper vh, Rect rect, bool shouldPreserveAspect, float segmentFillAmount, Color32 renderColor)
+    {
+        GenerateFilledSprite(vh, rect, shouldPreserveAspect, segmentFillAmount, renderColor, fillOrigin, fillClockwise);
+    }
+
+    private void GenerateFilledSprite(
+        VertexHelper vh,
+        Rect rect,
+        bool shouldPreserveAspect,
+        float segmentFillAmount,
+        Color32 renderColor,
+        int segmentFillOrigin,
+        bool segmentFillClockwise)
     {
         if (segmentFillAmount < 0.001f)
             return;
 
         Vector4 v = GetDrawingDimensions(rect, shouldPreserveAspect);
-        Vector4 outer = DataUtility.GetOuterUV(overrideSprite);
+        Sprite activeSprite = overrideSprite;
+        Vector4 outer = activeSprite != null ? DataUtility.GetOuterUV(activeSprite) : new Vector4(0f, 0f, 1f, 1f);
         float tx0 = outer.x;
         float ty0 = outer.y;
         float tx1 = outer.z;
@@ -671,7 +822,7 @@ public class SegmentedImage : Image
         if (fillMethod == FillMethod.Horizontal)
         {
             float fill = (tx1 - tx0) * segmentFillAmount;
-            if (fillOrigin == (int)OriginHorizontal.Right)
+            if (segmentFillOrigin == (int)OriginHorizontal.Right)
             {
                 v.x = v.z - (v.z - v.x) * segmentFillAmount;
                 tx0 = tx1 - fill;
@@ -685,7 +836,7 @@ public class SegmentedImage : Image
         else if (fillMethod == FillMethod.Vertical)
         {
             float fill = (ty1 - ty0) * segmentFillAmount;
-            if (fillOrigin == (int)OriginVertical.Top)
+            if (segmentFillOrigin == (int)OriginVertical.Top)
             {
                 v.y = v.w - (v.w - v.y) * segmentFillAmount;
                 ty0 = ty1 - fill;
@@ -711,8 +862,8 @@ public class SegmentedImage : Image
         {
             if (fillMethod == FillMethod.Radial90)
             {
-                if (RadialCut(s_Xy, s_Uv, segmentFillAmount, fillClockwise, fillOrigin))
-                    AddQuad(vh, s_Xy, color, s_Uv);
+                if (RadialCut(s_Xy, s_Uv, segmentFillAmount, segmentFillClockwise, segmentFillOrigin))
+                    AddQuad(vh, s_Xy, renderColor, s_Uv);
             }
             else if (fillMethod == FillMethod.Radial180)
             {
@@ -722,9 +873,9 @@ public class SegmentedImage : Image
                     float fx1;
                     float fy0;
                     float fy1;
-                    int even = fillOrigin > 1 ? 1 : 0;
+                    int even = segmentFillOrigin > 1 ? 1 : 0;
 
-                    if (fillOrigin == 0 || fillOrigin == 2)
+                    if (segmentFillOrigin == 0 || segmentFillOrigin == 2)
                     {
                         fy0 = 0f;
                         fy1 = 1f;
@@ -756,10 +907,10 @@ public class SegmentedImage : Image
                     }
 
                     SetRadialQuad(v, tx0, tx1, ty0, ty1, fx0, fx1, fy0, fy1);
-                    float val = fillClockwise ? segmentFillAmount * 2f - side : segmentFillAmount * 2f - (1 - side);
+                    float val = segmentFillClockwise ? segmentFillAmount * 2f - side : segmentFillAmount * 2f - (1 - side);
 
-                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), fillClockwise, (side + fillOrigin + 3) % 4))
-                        AddQuad(vh, s_Xy, color, s_Uv);
+                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), segmentFillClockwise, (side + segmentFillOrigin + 3) % 4))
+                        AddQuad(vh, s_Xy, renderColor, s_Uv);
                 }
             }
             else if (fillMethod == FillMethod.Radial360)
@@ -773,18 +924,18 @@ public class SegmentedImage : Image
 
                     SetRadialQuad(v, tx0, tx1, ty0, ty1, fx0, fx1, fy0, fy1);
 
-                    float val = fillClockwise
-                        ? segmentFillAmount * 4f - ((corner + fillOrigin) % 4)
-                        : segmentFillAmount * 4f - (3 - ((corner + fillOrigin) % 4));
+                    float val = segmentFillClockwise
+                        ? segmentFillAmount * 4f - ((corner + segmentFillOrigin) % 4)
+                        : segmentFillAmount * 4f - (3 - ((corner + segmentFillOrigin) % 4));
 
-                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), fillClockwise, (corner + 2) % 4))
-                        AddQuad(vh, s_Xy, color, s_Uv);
+                    if (RadialCut(s_Xy, s_Uv, Mathf.Clamp01(val), segmentFillClockwise, (corner + 2) % 4))
+                        AddQuad(vh, s_Xy, renderColor, s_Uv);
                 }
             }
         }
         else
         {
-            AddQuad(vh, s_Xy, color, s_Uv);
+            AddQuad(vh, s_Xy, renderColor, s_Uv);
         }
     }
 
@@ -1084,6 +1235,9 @@ namespace UnityEditor.UI
         private SerializedProperty m_ValueMode;
         private SerializedProperty m_IntMaxValue;
         private SerializedProperty m_FloatMaxValue;
+        private SerializedProperty m_EmptyColor;
+        private SerializedProperty m_IsHandle;
+        private SerializedProperty m_Script;
         private GUIContent m_SpriteContent;
         private GUIContent m_SpriteTypeContent;
         private GUIContent m_ClockwiseContent;
@@ -1158,6 +1312,9 @@ namespace UnityEditor.UI
             m_ValueMode = serializedObject.FindProperty("m_ValueMode");
             m_IntMaxValue = serializedObject.FindProperty("m_IntMaxValue");
             m_FloatMaxValue = serializedObject.FindProperty("m_FloatMaxValue");
+            m_EmptyColor = serializedObject.FindProperty("m_EmptyColor");
+            m_IsHandle = serializedObject.FindProperty("m_IsHandle");
+            m_Script = serializedObject.FindProperty("m_Script");
 
             var typeEnum = (Image.Type)m_Type.enumValueIndex;
             m_ShowSlicedOrTiled = new AnimBool(!m_Type.hasMultipleDifferentValues && (typeEnum == Image.Type.Sliced || typeEnum == Image.Type.Tiled));
@@ -1185,12 +1342,19 @@ namespace UnityEditor.UI
         {
             serializedObject.Update();
 
+            using (new EditorGUI.DisabledScope(true))
+            {
+                if (m_Script != null)
+                    EditorGUILayout.PropertyField(m_Script);
+            }
+
             var image = (SegmentedImage)target;
             RectTransform rect = image.GetComponent<RectTransform>();
             m_IsDriven = (rect.drivenByObject as Slider)?.fillRect == rect;
 
             SpriteGUI();
             AppearanceControlsGUI();
+            EditorGUILayout.PropertyField(m_EmptyColor, new GUIContent("Empty Color"));
             RaycastControlsGUI();
             MaskableControlsGUI();
             SegmentsGUI();
@@ -1227,6 +1391,7 @@ namespace UnityEditor.UI
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Segments", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_Direction, new GUIContent("Direction"));
+            EditorGUILayout.PropertyField(m_IsHandle, new GUIContent("Is Handle"));
             EditorGUILayout.PropertyField(m_SegmentCount, new GUIContent("Count"));
             EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing (px)"));
             DrawMaskGUI();
