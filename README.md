@@ -19,3 +19,4 @@ Unity3d uGUI script that draw multiplie images same as built-in, but in one line
 - skip specific segments
 - secondary color
 - sliced + filled
+- UnityEngine.UI.Slider direct support
